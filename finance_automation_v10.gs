@@ -352,6 +352,187 @@ function _ss() {
 
 // ===================== SHEET MANAGEMENT =====================
 
+function _setupInitialSheets(ss) {
+  try {
+    _logInfo('Setting up initial sheets...');
+    
+    // Define sheet configurations with headers
+    const sheetConfigs = {
+      [SHEET_NAMES.MAIN]: [
+        'Date', 'Amount', 'From Account', 'To Account', 'Bank', 'Notes', 'Email ID', 'Category', 'Type', 'Fingerprint'
+      ],
+      [SHEET_NAMES.STAGING]: [
+        'Date', 'Amount', 'From Account', 'To Account', 'Bank', 'Email ID', 'Staged At', 'Direction', 'Status', 'Fingerprint'
+      ],
+      [SHEET_NAMES.ACCOUNTS]: [
+        'Account Name', 'Balance', 'Account Type', 'Bank', 'Last Updated'
+      ],
+      [SHEET_NAMES.HOLDINGS]: [
+        'Ticker', 'Shares', 'Cost Basis', 'Current Price', 'Current Value', 'Account', 'Last Updated'
+      ],
+      [SHEET_NAMES.CATEGORIES]: [
+        'Merchant Pattern', 'Category'
+      ],
+      [SHEET_NAMES.DASHBOARD]: [
+        'Finance Dashboard - Auto-Generated'
+      ],
+      [SHEET_NAMES.NET_WORTH]: [
+        'Date', 'Total Assets', 'Total Liabilities', 'Net Worth', 'Notes'
+      ],
+      [SHEET_NAMES.CSV_IMPORT]: [
+        'Import Date', 'Source File', 'Records Imported', 'Status', 'Notes'
+      ],
+      [SHEET_NAMES.AUDIT_LOG]: [
+        'Timestamp', 'Level', 'Message', 'Details', 'Function'
+      ]
+    };
+    
+    // Create or ensure each sheet exists with proper headers
+    for (const [sheetName, headers] of Object.entries(sheetConfigs)) {
+      let sheet = ss.getSheetByName(sheetName);
+      
+      if (!sheet) {
+        // Create new sheet
+        sheet = ss.insertSheet(sheetName);
+        _logInfo(`Created new sheet: ${sheetName}`);
+      }
+      
+      // Set headers if sheet is empty or has no headers
+      if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '') {
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
+        
+        // Auto-resize columns
+        for (let i = 1; i <= headers.length; i++) {
+          sheet.autoResizeColumn(i);
+        }
+        
+        _logInfo(`Set headers for sheet: ${sheetName}`);
+      }
+      
+      // Apply specific formatting for certain sheets
+      if (sheetName === SHEET_NAMES.MAIN || sheetName === SHEET_NAMES.STAGING) {
+        // Format amount columns as currency
+        if (sheet.getLastRow() > 1) {
+          sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).setNumberFormat('$#,##0.00');
+        }
+      }
+      
+      if (sheetName === SHEET_NAMES.HOLDINGS) {
+        // Format price and value columns
+        if (sheet.getLastRow() > 1) {
+          sheet.getRange(2, 4, sheet.getLastRow() - 1, 1).setNumberFormat('$#,##0.00'); // Current Price
+          sheet.getRange(2, 5, sheet.getLastRow() - 1, 1).setNumberFormat('$#,##0.00'); // Current Value
+        }
+      }
+      
+      if (sheetName === SHEET_NAMES.ACCOUNTS) {
+        // Format balance column
+        if (sheet.getLastRow() > 1) {
+          sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).setNumberFormat('$#,##0.00');
+        }
+      }
+    }
+    
+    _logInfo('All sheets ensured successfully');
+    
+  } catch (error) {
+    _logError('Failed to setup initial sheets', error);
+    throw error;
+  }
+}
+
+function _ensureSheetsAndHeaders() {
+  try {
+    const ss = _ss();
+    return _setupInitialSheets(ss);
+  } catch (error) {
+    _logError('Failed to ensure sheets and headers', error);
+    throw error;
+  }
+}
+
+function _ensureAccountExists(accountsSheet, accountName) {
+  try {
+    if (!accountName || !accountsSheet) return -1;
+    
+    const normalizedName = _normalizeAccountName(accountName);
+    
+    // Check if account already exists
+    const existingRow = _findAccountRow(accountsSheet, normalizedName);
+    if (existingRow > 0) return existingRow;
+    
+    // Create new account
+    const accountType = _determineAccountType(normalizedName);
+    const newRow = [normalizedName, 0, accountType, _extractBankName(accountName), new Date()];
+    
+    accountsSheet.appendRow(newRow);
+    const rowNumber = accountsSheet.getLastRow();
+    
+    // Format the balance cell
+    accountsSheet.getRange(rowNumber, 2).setNumberFormat('$#,##0.00');
+    
+    _logInfo(`Created new account: ${normalizedName} (${accountType})`);
+    return rowNumber;
+    
+  } catch (error) {
+    _logError('Failed to ensure account exists', error, { accountName });
+    return -1;
+  }
+}
+
+function _findAccountRow(accountsSheet, accountName) {
+  try {
+    if (!accountsSheet || !accountName) return -1;
+    
+    const normalizedSearchName = _normalizeAccountName(accountName);
+    const lastRow = accountsSheet.getLastRow();
+    
+    if (lastRow < 2) return -1;
+    
+    const data = accountsSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    
+    for (let i = 0; i < data.length; i++) {
+      const existingName = _normalizeAccountName(data[i][0] || '');
+      if (existingName === normalizedSearchName) {
+        return i + 2; // Convert to sheet row number
+      }
+    }
+    
+    return -1;
+  } catch (error) {
+    _logError('Failed to find account row', error, { accountName });
+    return -1;
+  }
+}
+
+function _determineAccountType(accountName) {
+  const name = _lc(accountName);
+  
+  if (name.includes('checking') || name.includes('chequing')) return 'Checking';
+  if (name.includes('savings')) return 'Savings';
+  if (name.includes('credit') || name.includes('card')) return 'Credit Card';
+  if (name.includes('investment') || name.includes('wealthsimple') || name.includes('tfsa') || name.includes('rrsp')) return 'Investment';
+  if (name.includes('loan') || name.includes('mortgage')) return 'Loan';
+  if (name.includes('line of credit') || name.includes('loc')) return 'Line of Credit';
+  
+  return 'Other';
+}
+
+function _extractBankName(accountName) {
+  const name = _lc(accountName);
+  
+  if (name.includes('cibc')) return 'CIBC';
+  if (name.includes('pc financial') || name.includes('pc mastercard')) return 'PC Financial';
+  if (name.includes('wealthsimple')) return 'Wealthsimple';
+  if (name.includes('rbc')) return 'RBC';
+  if (name.includes('td')) return 'TD';
+  if (name.includes('scotiabank')) return 'Scotiabank';
+  if (name.includes('bmo')) return 'BMO';
+  
+  return 'Unknown';
+}
+
 function _ensureSheetsAndHeaders() {
   const ss = _ss();
   
