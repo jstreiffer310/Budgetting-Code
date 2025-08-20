@@ -409,35 +409,45 @@ function _generateFingerprint(transaction) {
 }
 
 function _isDuplicateTransaction(transaction, mainSheet) {
-  if (!mainSheet || mainSheet.getLastRow() < 2) return false;
-  
-  const data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, Object.keys(COLUMNS.TRANSACTIONS).length).getValues();
-  const newFingerprint = _generateFingerprint(transaction);
-  
-  return data.some(row => {
-    // Check by email ID first (most reliable)
-    if (transaction.emailId && _normalize(row[COLUMNS.TRANSACTIONS.EMAIL_ID - 1]) === transaction.emailId) {
-      return true;
-    }
+  try {
+    if (!mainSheet || mainSheet.getLastRow() < 2) return false;
     
-    // Check by fingerprint
-    if (row[COLUMNS.TRANSACTIONS.FINGERPRINT - 1] === newFingerprint) {
-      return true;
-    }
+    // Use dynamic column count
+    const lastRow = mainSheet.getLastRow();
+    const lastCol = Math.max(mainSheet.getLastColumn(), 10); // Ensure minimum columns
     
-    // Legacy check for transactions without fingerprints
-    const existingDate = row[COLUMNS.TRANSACTIONS.DATE - 1] ? 
-      new Date(row[COLUMNS.TRANSACTIONS.DATE - 1]).toDateString() : '';
-    const transactionDate = transaction.date ? 
-      new Date(transaction.date).toDateString() : '';
-    const existingAmount = parseFloat(row[COLUMNS.TRANSACTIONS.AMOUNT - 1] || 0);
-    const transactionAmount = parseFloat(transaction.amount || 0);
+    const data = mainSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const newFingerprint = _generateFingerprint(transaction);
     
-    return existingDate === transactionDate &&
-           Math.abs(existingAmount - transactionAmount) < CONFIG.AMOUNT_TOLERANCE &&
-           _normalize(row[COLUMNS.TRANSACTIONS.FROM - 1]) === _normalize(transaction.fromAccount) &&
-           _normalize(row[COLUMNS.TRANSACTIONS.TO - 1]) === _normalize(transaction.toAccount);
-  });
+    return data.some(row => {
+      if (!row || row.length === 0) return false;
+      
+      // Use hardcoded indices for main transaction sheet structure
+      // Check by email ID first (Column G: Email ID)
+      if (transaction.emailId && _normalize(row[6] || '') === transaction.emailId) {
+        return true;
+      }
+      
+      // Check by fingerprint (Column J: Fingerprint)
+      if (row[9] === newFingerprint) {
+        return true;
+      }
+      
+      // Legacy check for transactions without fingerprints
+      const existingDate = row[0] ? new Date(row[0]).toDateString() : ''; // Column A: Date
+      const transactionDate = transaction.date ? new Date(transaction.date).toDateString() : '';
+      const existingAmount = parseFloat(row[1] || 0); // Column B: Amount
+      const transactionAmount = parseFloat(transaction.amount || 0);
+      
+      return existingDate === transactionDate &&
+             Math.abs(existingAmount - transactionAmount) < CONFIG.AMOUNT_TOLERANCE &&
+             _normalize(row[2] || '') === _normalize(transaction.fromAccount) && // Column C: From Account
+             _normalize(row[3] || '') === _normalize(transaction.toAccount); // Column D: To Account
+    });
+  } catch (error) {
+    _logError('Failed to check for duplicate transaction', error);
+    return false;
+  }
 }
 
 // ===================== ACCOUNT MANAGEMENT =====================
@@ -745,13 +755,13 @@ function _processNewEmails() {
     const existingIds = new Set();
     
     if (mainSheet.getLastRow() > 1) {
-      const mainIds = mainSheet.getRange(2, COLUMNS.TRANSACTIONS.EMAIL_ID, mainSheet.getLastRow() - 1, 1)
+      const mainIds = mainSheet.getRange(2, 7, mainSheet.getLastRow() - 1, 1) // Column G: Email ID
         .getValues().flat().filter(id => id);
       mainIds.forEach(id => existingIds.add(id));
     }
     
     if (stagingSheet.getLastRow() > 1) {
-      const stagingIds = stagingSheet.getRange(2, COLUMNS.STAGING.EMAIL_ID, stagingSheet.getLastRow() - 1, 1)
+      const stagingIds = stagingSheet.getRange(2, 6, stagingSheet.getLastRow() - 1, 1) // Column F: Email ID
         .getValues().flat().filter(id => id);
       stagingIds.forEach(id => existingIds.add(id));
     }
@@ -929,30 +939,49 @@ function _pairStagedTransfers() {
       return;
     }
     
-    const data = stagingSheet.getRange(2, 1, stagingSheet.getLastRow() - 1, Object.keys(COLUMNS.STAGING).length).getValues();
+    // Use dynamic column count
+    const lastRow = stagingSheet.getLastRow();
+    const lastCol = Math.max(stagingSheet.getLastColumn(), 10); // Ensure minimum columns
+    
+    const data = stagingSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     const paired = new Set();
     let pairCount = 0;
     
     for (let i = 0; i < data.length; i++) {
-      if (paired.has(i) || _normalize(data[i][COLUMNS.STAGING.STATUS - 1]) === 'Pending Review') continue;
+      if (paired.has(i) || !data[i] || data[i].length === 0) continue;
+      
+      // Use hardcoded indices for staging sheet structure
+      const status = _normalize(data[i][8] || ''); // Column I: Status
+      if (status === 'pending review') continue;
       
       const txA = {
-        index: i, date: new Date(data[i][COLUMNS.STAGING.DATE - 1]),
-        amount: parseFloat(data[i][COLUMNS.STAGING.AMOUNT - 1] || 0),
-        fromAccount: data[i][COLUMNS.STAGING.FROM - 1], toAccount: data[i][COLUMNS.STAGING.TO - 1],
-        bank: data[i][COLUMNS.STAGING.BANK - 1], emailId: data[i][COLUMNS.STAGING.EMAIL_ID - 1],
-        direction: data[i][COLUMNS.STAGING.DIRECTION - 1], fingerprint: data[i][COLUMNS.STAGING.FINGERPRINT - 1]
+        index: i, 
+        date: new Date(data[i][0] || new Date()), // Column A: Date
+        amount: parseFloat(data[i][1] || 0), // Column B: Amount
+        fromAccount: data[i][2] || '', // Column C: From Account
+        toAccount: data[i][3] || '', // Column D: To Account
+        bank: data[i][4] || '', // Column E: Bank
+        emailId: data[i][5] || '', // Column F: Email ID
+        direction: data[i][7] || '', // Column H: Direction
+        fingerprint: data[i][9] || '' // Column J: Fingerprint
       };
       
       for (let j = i + 1; j < data.length; j++) {
-        if (paired.has(j) || _normalize(data[j][COLUMNS.STAGING.STATUS - 1]) === 'Pending Review') continue;
+        if (paired.has(j) || !data[j] || data[j].length === 0) continue;
+        
+        const statusB = _normalize(data[j][8] || ''); // Column I: Status
+        if (statusB === 'pending review') continue;
         
         const txB = {
-          index: j, date: new Date(data[j][COLUMNS.STAGING.DATE - 1]),
-          amount: parseFloat(data[j][COLUMNS.STAGING.AMOUNT - 1] || 0),
-          fromAccount: data[j][COLUMNS.STAGING.FROM - 1], toAccount: data[j][COLUMNS.STAGING.TO - 1],
-          bank: data[j][COLUMNS.STAGING.BANK - 1], emailId: data[j][COLUMNS.STAGING.EMAIL_ID - 1],
-          direction: data[j][COLUMNS.STAGING.DIRECTION - 1], fingerprint: data[j][COLUMNS.STAGING.FINGERPRINT - 1]
+          index: j,
+          date: new Date(data[j][0] || new Date()),
+          amount: parseFloat(data[j][1] || 0),
+          fromAccount: data[j][2] || '',
+          toAccount: data[j][3] || '',
+          bank: data[j][4] || '',
+          emailId: data[j][5] || '',
+          direction: data[j][7] || '',
+          fingerprint: data[j][9] || ''
         };
         
         if (_canPairTransactions(txA, txB)) {
@@ -1032,30 +1061,37 @@ function _cleanupStaleTransactions() {
     
     if (!stagingSheet || stagingSheet.getLastRow() < 2) return;
     
-    const data = stagingSheet.getRange(2, 1, stagingSheet.getLastRow() - 1, Object.keys(COLUMNS.STAGING).length).getValues();
+    // Use dynamic column count
+    const lastRow = stagingSheet.getLastRow();
+    const lastCol = Math.max(stagingSheet.getLastColumn(), 10); // Ensure minimum columns
+    
+    const data = stagingSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     const now = new Date();
     const staleThreshold = CONFIG.STALE_CLEANUP_HOURS * 60 * 60 * 1000;
     const pendingCleanupThreshold = 7 * 24 * 60 * 60 * 1000; // 7 days for pending items
     let cleanedCount = 0;
     
     for (let i = data.length - 1; i >= 0; i--) {
-      const stagedAt = new Date(data[i][COLUMNS.STAGING.STAGED_AT - 1]);
-      const status = _normalize(data[i][COLUMNS.STAGING.STATUS - 1]);
-      const isPending = status === 'Pending Review';
+      if (!data[i] || data[i].length === 0) continue;
+      
+      // Use hardcoded indices for staging sheet structure
+      const stagedAt = new Date(data[i][6] || new Date()); // Column G: Staged At
+      const status = _normalize(data[i][8] || ''); // Column I: Status
+      const isPending = status === 'pending review';
       
       const threshold = isPending ? pendingCleanupThreshold : staleThreshold;
       
       if (now.getTime() - stagedAt.getTime() > threshold) {
         const staleTransaction = {
-          date: new Date(data[i][COLUMNS.STAGING.DATE - 1]),
-          amount: parseFloat(data[i][COLUMNS.STAGING.AMOUNT - 1] || 0),
-          fromAccount: data[i][COLUMNS.STAGING.FROM - 1] || '',
-          toAccount: data[i][COLUMNS.STAGING.TO - 1] || 'External',
+          date: new Date(data[i][0] || new Date()), // Column A: Date
+          amount: parseFloat(data[i][1] || 0), // Column B: Amount
+          fromAccount: data[i][2] || '', // Column C: From Account
+          toAccount: data[i][3] || 'External', // Column D: To Account
           bank: isPending ? 'Manual Review Required' : 'Stale Transaction Cleanup',
-          emailId: data[i][COLUMNS.STAGING.EMAIL_ID - 1] || '',
+          emailId: data[i][5] || '', // Column F: Email ID
           type: isPending ? 'Needs Review' : 'Stale Cleanup',
           notes: isPending ? 'Pending transaction requiring manual review' : 'Auto-logged from expired staging',
-          fingerprint: data[i][COLUMNS.STAGING.FINGERPRINT - 1] || ''
+          fingerprint: data[i][9] || '' // Column J: Fingerprint
         };
         
         _commitTransaction(staleTransaction, mainSheet, accountsSheet);
@@ -1235,12 +1271,22 @@ function _refreshHoldingsData() {
       return;
     }
     
-    const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, Object.keys(COLUMNS.HOLDINGS).length).getValues();
+    // Use dynamic column count instead of Object.keys which can be null
+    const lastCol = holdingsSheet.getLastColumn();
+    const lastRow = holdingsSheet.getLastRow();
+    
+    if (lastCol < 1 || lastRow < 2) {
+      _logInfo('Holdings sheet has insufficient data');
+      return;
+    }
+    
+    const data = holdingsSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     let updatedCount = 0;
     
     for (let i = 0; i < data.length; i++) {
-      const ticker = data[i][COLUMNS.HOLDINGS.TICKER - 1];
-      const shares = parseFloat(data[i][COLUMNS.HOLDINGS.SHARES - 1] || 0);
+      // Use hardcoded indices based on standard holdings sheet structure
+      const ticker = data[i][0]; // Column A: Ticker
+      const shares = parseFloat(data[i][1] || 0); // Column B: Shares
       
       if (!ticker || shares <= 0) continue;
       
@@ -1251,7 +1297,7 @@ function _refreshHoldingsData() {
       if (!price || price <= 0) {
         const formula = _buildGoogleFinanceFormula(ticker);
         if (formula) {
-          holdingsSheet.getRange(i + 2, COLUMNS.HOLDINGS.PRICE).setFormula(formula);
+          holdingsSheet.getRange(i + 2, 3).setFormula(formula); // Column C: Price
           _logInfo(`Set Google Finance formula for ${ticker}: ${formula}`);
           continue;
         }
@@ -1260,15 +1306,15 @@ function _refreshHoldingsData() {
       if (price > 0) {
         const currentValue = shares * price;
         
-        holdingsSheet.getRange(i + 2, COLUMNS.HOLDINGS.PRICE).setValue(price);
-        holdingsSheet.getRange(i + 2, COLUMNS.HOLDINGS.CURRENT_VALUE).setValue(currentValue);
-        holdingsSheet.getRange(i + 2, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
+        holdingsSheet.getRange(i + 2, 3).setValue(price); // Column C: Price
+        holdingsSheet.getRange(i + 2, 4).setValue(currentValue); // Column D: Current Value
+        holdingsSheet.getRange(i + 2, 6).setValue(new Date()); // Column F: Last Updated
         
         updatedCount++;
         
         // Special formatting for high-precision crypto prices (SHIB)
         if (ticker.toUpperCase().includes('SHIB') && price < 0.01) {
-          const cell = holdingsSheet.getRange(i + 2, COLUMNS.HOLDINGS.PRICE);
+          const cell = holdingsSheet.getRange(i + 2, 3);
           cell.setNumberFormat('0.000000');
         }
         
@@ -1325,15 +1371,15 @@ function _updateHoldingsFromEmail(holdings) {
       const existingRow = _findHoldingRow(holdingsSheet, holding.ticker);
       
       if (existingRow > 0) {
-        // Update existing holding
-        holdingsSheet.getRange(existingRow, COLUMNS.HOLDINGS.SHARES).setValue(holding.shares);
-        holdingsSheet.getRange(existingRow, COLUMNS.HOLDINGS.PRICE).setValue(holding.price);
-        holdingsSheet.getRange(existingRow, COLUMNS.HOLDINGS.CURRENT_VALUE).setValue(holding.value);
-        holdingsSheet.getRange(existingRow, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
+        // Update existing holding - using hardcoded column indices
+        holdingsSheet.getRange(existingRow, 2).setValue(holding.shares); // Column B: Shares
+        holdingsSheet.getRange(existingRow, 3).setValue(holding.price); // Column C: Price
+        holdingsSheet.getRange(existingRow, 4).setValue(holding.value); // Column D: Current Value
+        holdingsSheet.getRange(existingRow, 6).setValue(new Date()); // Column F: Last Updated
       } else {
         // Add new holding
         const newRow = [
-          holding.ticker, holding.shares, 0, holding.price, holding.value, '', new Date()
+          holding.ticker, holding.shares, holding.price, holding.value, '', new Date()
         ];
         holdingsSheet.appendRow(newRow);
       }
@@ -1532,19 +1578,34 @@ function _getTransactionData(mainSheet, month, year) {
   try {
     if (!mainSheet || mainSheet.getLastRow() < 2) return [];
     
-    const data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, Object.keys(COLUMNS.MAIN).length).getValues();
+    // Use dynamic column count instead of Object.keys which can fail
+    const lastRow = mainSheet.getLastRow();
+    const lastCol = Math.max(mainSheet.getLastColumn(), 10); // Ensure minimum columns
+    
+    const data = mainSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     const transactions = [];
     
     for (const row of data) {
-      const date = new Date(row[COLUMNS.MAIN.DATE - 1]);
+      // Handle potential null/undefined row data
+      if (!row || row.length === 0) continue;
+      
+      // Use hardcoded indices for standard transaction sheet structure
+      const date = new Date(row[0] || new Date()); // Column A: Date
+      const amount = parseFloat(row[1] || 0); // Column B: Amount
+      const fromAccount = row[2] || ''; // Column C: From Account
+      const toAccount = row[3] || ''; // Column D: To Account
+      const category = row[7] || 'Uncategorized'; // Column H: Category
+      const type = row[8] || ''; // Column I: Type
+      
+      // Check if transaction is within the specified month/year
       if (date.getMonth() === month && date.getFullYear() === year) {
         transactions.push({
           date: date,
-          amount: parseFloat(row[COLUMNS.MAIN.AMOUNT - 1] || 0),
-          fromAccount: row[COLUMNS.MAIN.FROM - 1] || '',
-          toAccount: row[COLUMNS.MAIN.TO - 1] || '',
-          category: row[COLUMNS.MAIN.CATEGORY - 1] || 'Uncategorized',
-          type: row[COLUMNS.MAIN.TYPE - 1] || ''
+          amount: amount,
+          fromAccount: fromAccount,
+          toAccount: toAccount,
+          category: category,
+          type: type
         });
       }
     }
@@ -1583,14 +1644,22 @@ function _getAccountBalances(accountsSheet) {
   try {
     if (!accountsSheet || accountsSheet.getLastRow() < 2) return balances;
     
-    const data = accountsSheet.getRange(2, 1, accountsSheet.getLastRow() - 1, Object.keys(COLUMNS.ACCOUNTS).length).getValues();
+    // Use dynamic column count
+    const lastRow = accountsSheet.getLastRow();
+    const lastCol = Math.max(accountsSheet.getLastColumn(), 5); // Ensure minimum columns
+    
+    const data = accountsSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     
     for (const row of data) {
-      const accountName = row[COLUMNS.ACCOUNTS.NAME - 1];
-      const balance = parseFloat(row[COLUMNS.ACCOUNTS.BALANCE - 1] || 0);
-      const accountType = row[COLUMNS.ACCOUNTS.TYPE - 1] || '';
+      // Handle potential null/undefined row data
+      if (!row || row.length === 0) continue;
       
-      if (accountName) {
+      // Use hardcoded indices for standard accounts sheet structure
+      const accountName = row[0]; // Column A: Account Name
+      const balance = parseFloat(row[1] || 0); // Column B: Balance
+      const accountType = row[2] || ''; // Column C: Account Type
+      
+      if (accountName && accountName.toString().trim()) {
         balances[accountName] = { balance, type: accountType };
       }
     }
@@ -1607,11 +1676,21 @@ function _getPortfolioValue(holdingsSheet) {
   try {
     if (!holdingsSheet || holdingsSheet.getLastRow() < 2) return totalValue;
     
-    const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, Object.keys(COLUMNS.HOLDINGS).length).getValues();
+    // Use dynamic column count
+    const lastRow = holdingsSheet.getLastRow();
+    const lastCol = Math.max(holdingsSheet.getLastColumn(), 6); // Ensure minimum columns
+    
+    const data = holdingsSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     
     for (const row of data) {
-      const currentValue = parseFloat(row[COLUMNS.HOLDINGS.CURRENT_VALUE - 1] || 0);
-      totalValue += currentValue;
+      // Handle potential null/undefined row data
+      if (!row || row.length === 0) continue;
+      
+      // Use hardcoded index for current value (Column D in standard holdings sheet)
+      const currentValue = parseFloat(row[3] || 0); // Column D: Current Value
+      if (!isNaN(currentValue) && currentValue > 0) {
+        totalValue += currentValue;
+      }
     }
   } catch (error) {
     _logError('Failed to get portfolio value', error);
@@ -1677,8 +1756,12 @@ function onOpen() {
     .addItem('🔧 Run Full Automation', 'runFullAutomation')
     .addItem('⚡ Quick Setup', 'quickSetup')
     .addSeparator()
-    .addItem('📋 Show Configuration', 'showConfiguration')
+    .addItem('🏷️ Learn Categories', 'learnCategories')
+    .addItem('� Review Pending Transactions', 'reviewPendingTransactions')
+    .addSeparator()
+    .addItem('�📋 Show Configuration', 'showConfiguration')
     .addItem('🧪 Test Email Parsing', 'testEmailParsing')
+    .addItem('💰 Test SHIB Price', 'testShibPriceFetch')
     .addToUi();
 }
 
@@ -2041,6 +2124,183 @@ function analyzeSpreadsheetStructure() {
   } catch (error) {
     _logError('Failed to analyze spreadsheet structure', error);
     return 'Analysis failed';
+  }
+}
+
+// Enhanced category learning function (from improved_category_learning.js)
+function learnCategories() {
+  try {
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    
+    if (!mainSheet || !categoriesSheet) {
+      _logError('Required sheets not found for category learning');
+      return;
+    }
+    
+    // Get all transactions
+    const lastRow = mainSheet.getLastRow();
+    if (lastRow < 2) {
+      _logInfo('No transactions found for category learning');
+      return;
+    }
+    
+    const data = mainSheet.getRange(2, 1, lastRow - 1, Math.max(mainSheet.getLastColumn(), 10)).getValues();
+    const categoryMappings = {};
+    let newMappings = 0;
+    
+    // Process each transaction
+    for (const row of data) {
+      if (!row || row.length === 0) continue;
+      
+      // Use hardcoded indices for main transaction sheet
+      const toAccount = row[3] || ''; // Column D: To Account  
+      const category = row[7] || ''; // Column H: Category
+      
+      if (!toAccount || !category || category === 'Uncategorized') continue;
+      
+      // Extract meaningful merchant name
+      const merchant = _extractMerchantName(toAccount);
+      if (!merchant || merchant.length < 3) continue;
+      
+      // Build or update mapping
+      const merchantKey = _lc(merchant);
+      if (!categoryMappings[merchantKey]) {
+        categoryMappings[merchantKey] = { category: category, count: 1, merchants: new Set([merchant]) };
+      } else {
+        categoryMappings[merchantKey].count++;
+        categoryMappings[merchantKey].merchants.add(merchant);
+        // Use the most common category
+        if (categoryMappings[merchantKey].category !== category) {
+          categoryMappings[merchantKey].category = category; // For simplicity, use latest
+        }
+      }
+    }
+    
+    // Get existing category mappings
+    const existingMappings = new Set();
+    if (categoriesSheet.getLastRow() > 1) {
+      const existingData = categoriesSheet.getRange(2, 1, categoriesSheet.getLastRow() - 1, 2).getValues();
+      existingData.forEach(row => {
+        if (row[0]) existingMappings.add(_lc(row[0]));
+      });
+    }
+    
+    // Add new mappings
+    for (const [merchantKey, info] of Object.entries(categoryMappings)) {
+      if (!existingMappings.has(merchantKey) && info.count >= 2) { // Only add if seen multiple times
+        const bestMerchant = Array.from(info.merchants)[0]; // Use first variant
+        categoriesSheet.appendRow([bestMerchant, info.category]);
+        newMappings++;
+      }
+    }
+    
+    if (newMappings > 0) {
+      _logInfo(`Category learning completed: ${newMappings} new merchant mappings added`);
+      try { SpreadsheetApp.getUi().alert(`Added ${newMappings} new category mappings based on transaction history.`); } catch (e) {}
+    } else {
+      _logInfo('Category learning completed: no new mappings needed');
+      try { SpreadsheetApp.getUi().alert('No new category mappings needed.'); } catch (e) {}
+    }
+    
+  } catch (error) {
+    _logError('Failed to learn categories', error);
+    try { SpreadsheetApp.getUi().alert('Category learning failed: ' + error.message); } catch (e) {}
+  }
+}
+
+// Review pending transactions (from additional_fixes.js)
+function reviewPendingTransactions() {
+  try {
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const stagingSheet = ss.getSheetByName(SHEET_NAMES.STAGING);
+    
+    let pendingCount = 0;
+    let allPending = [];
+    
+    // Check main transactions for pending ones
+    if (mainSheet && mainSheet.getLastRow() > 1) {
+      const data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, Math.max(mainSheet.getLastColumn(), 10)).getValues();
+      
+      data.forEach((row, index) => {
+        if (!row || row.length === 0) return;
+        
+        const rowNum = index + 2;
+        const notes = _normalize(row[5] || ''); // Column F: Notes
+        const toAccount = _normalize(row[3] || ''); // Column D: To Account
+        
+        if (notes.includes('pending') || toAccount.includes('pending')) {
+          pendingCount++;
+          allPending.push({
+            sheet: 'Transactions',
+            row: rowNum,
+            date: new Date(row[0] || new Date()),
+            amount: row[1] || 0,
+            description: `${row[2] || ''} → ${row[3] || ''}` // From → To
+          });
+        }
+      });
+    }
+    
+    // Check staging sheet for pending transactions
+    if (stagingSheet && stagingSheet.getLastRow() > 1) {
+      const data = stagingSheet.getRange(2, 1, stagingSheet.getLastRow() - 1, Math.max(stagingSheet.getLastColumn(), 10)).getValues();
+      
+      data.forEach((row, index) => {
+        if (!row || row.length === 0) return;
+        
+        const rowNum = index + 2;
+        const status = _normalize(row[8] || ''); // Column I: Status
+        
+        if (status.includes('pending')) {
+          pendingCount++;
+          allPending.push({
+            sheet: 'Staging',
+            row: rowNum,
+            date: new Date(row[0] || new Date()),
+            amount: row[1] || 0,
+            description: `${row[2] || ''} → ${row[3] || ''}` // From → To
+          });
+        }
+      });
+    }
+    
+    // Sort all pending items by date (newest first)
+    allPending.sort((a, b) => b.date - a.date);
+    
+    if (allPending.length === 0) {
+      try { SpreadsheetApp.getUi().alert('No pending transactions found.'); } catch (e) {}
+      return;
+    }
+    
+    // Format list for display
+    const pendingList = allPending.map(item => 
+      `• ${item.sheet} Row ${item.row}: ${item.date.toLocaleDateString()} - ${item.amount} - ${item.description}`
+    ).join('\n');
+    
+    const message = `Found ${allPending.length} pending transactions that need review:\n\n${pendingList}`;
+    
+    try { SpreadsheetApp.getUi().alert(message); } catch (e) {}
+    _logInfo('Pending transaction review completed', { count: allPending.length });
+    
+  } catch (error) {
+    _logError('Failed to review pending transactions', error);
+    try { SpreadsheetApp.getUi().alert('Failed to review pending transactions: ' + error.message); } catch (e) {}
+  }
+}
+
+// Test SHIB price fetching (from additional_fixes.js)
+function testShibPriceFetch() {
+  try {
+    const price = _fetchCryptoPriceWithPrecision('SHIB-USD');
+    const message = `SHIB-USD price: $${price.toFixed(8)}`;
+    _logInfo(message);
+    try { SpreadsheetApp.getUi().alert(message); } catch (e) {}
+  } catch (error) {
+    _logError('Failed to fetch SHIB price', error);
+    try { SpreadsheetApp.getUi().alert('Failed to fetch SHIB price: ' + error.message); } catch (e) {}
   }
 }
 
