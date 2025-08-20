@@ -2069,47 +2069,7 @@ function deleteScheduledTriggers() {
 
 // ===================== SCRIPT METADATA & VERSION INFO =====================
 
-const SCRIPT_VERSION = '6.0.0';
-const SCRIPT_BUILD_DATE = '2024-08-19';
-const SCRIPT_FEATURES = [
-  'Robust Email Parsing (CIBC, PC Financial, Interac, Wealthsimple)',
-  'Advanced Staging/Pairing System with Configurable Windows',
-  'Fingerprint-based Duplicate Detection',
-  'Comprehensive Account Balance Management',
-  'Holdings Tracking with Automatic Price Updates',
-  'Category Learning with Multi-keyword Support',
-  'Configurable Dashboard with Multiple Chart Types',
-  'CSV Import with Auto-detection',
-  'Data Validation and Repair Tools',
-  'Comprehensive Audit Logging',
-  'Error Recovery and Emergency Functions',
-  'Performance Optimization Tools',
-  'Security and Access Control Features'
-];
-
-function showAbout() {
-  const about = `
-Finance Automation System V${SCRIPT_VERSION}
-${'='.repeat(40)}
-
-Build Date: ${SCRIPT_BUILD_DATE}
-Spreadsheet: ${SPREADSHEET_ID}
-
-FEATURES:
-${SCRIPT_FEATURES.map(f => `• ${f}`).join('\n')}
-
-AUTHOR: Advanced AI Assistant
-LICENSE: Internal Use Only
-
-This system provides comprehensive automation for personal
-finance tracking with robust error handling, data validation,
-and extensive logging capabilities.
-
-Generated: ${new Date().toLocaleString()}
-  `;
-  
-  SpreadsheetApp.getUi().alert(about);
-}
+// ...existing code...
 
 // ===================== FINAL SYSTEM INITIALIZATION =====================
 
@@ -2121,7 +2081,7 @@ try {
   }
 } catch (error) {
   console.error('Failed to initialize Finance Automation System:', error);
-}
+// ...existing code...
 
 // ===================== END OF FINANCE AUTOMATION V6 =====================
   try {
