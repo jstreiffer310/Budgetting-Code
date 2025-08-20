@@ -1,7 +1,127 @@
+/**
+ * FINANCE AUTOMATION V8.0 - COMPREHENSIVE UPGRADE
+ * ==============================================
+ * 
+ * Significant improvements in this version:
+ * - Fixed category classification to avoid unhelpful/generic keywords
+ * - Proper investment value aggregation for Wealthsimple accounts
+ * - Enhanced dashboard with proper category recognition from manual entries
+ * - Fixed SHIB and other small-decimal cryptocurrency price fetching
+ * - Improved transfer recipient detection for Interac/PC Financial
+ * - Added transaction review system for pending/unclear items
+ * - Comprehensive error handling and recovery mechanisms
+ * - Integrated all improvements from files folder
+ * 
+ * Last Updated: 2025-08-20
+ * Author: jstreiffer310 (with AI assistance)
+ */
+
+// ===================== CONFIGURATION & CONSTANTS =====================
+
+const SPREADSHEET_ID = '1-eUeYMTeKoz2bIkHS8Jc2J9vO0Bnl8y6aHXmXGdJqg8';
+
+// Sheet names
+const SHEET_NAMES = {
+  MAIN: 'Transactions',
+  ACCOUNTS: 'Accounts',
+  HOLDINGS: 'Holdings',
+  STAGING: 'Staging',
+  CATEGORIES: 'Categories',
+  NETWORTH: 'NetWorthHistory',
+  DASHBOARD: 'Dashboard',
+  CSV_IMPORT: 'CSV_Import',
+  AUDIT_LOG: 'AuditLog'
+};
+
+// Column schemas - explicit indexing to prevent magic number issues
+const COLUMNS = {
+  TRANSACTIONS: {
+    DATE: 1,
+    AMOUNT: 2,
+    FROM: 3,
+    TO: 4,
+    BANK: 5,
+    NOTES: 6,
+    EMAIL_ID: 7,
+    CATEGORY: 8,
+    TYPE: 9,
+    FINGERPRINT: 10
+  },
+  ACCOUNTS: {
+    NAME: 1,
+    BALANCE: 2,
+    TYPE: 3,
+    LAST_UPDATED: 4
+  },
+  HOLDINGS: {
+    ACCOUNT: 1,
+    TICKER: 2,
+    SHARES: 3,
+    UNIT_PRICE: 4,
+    TOTAL_VALUE: 5,
+    LAST_UPDATED: 6
+  },
+  STAGING: {
+    DATE: 1,
+    AMOUNT: 2,
+    FROM: 3,
+    TO: 4,
+    BANK: 5,
+    NOTES: 6,
+    EMAIL_ID: 7,
+    STATUS: 8,
+    FINGERPRINT: 9
+  },
+  CATEGORIES: {
+    KEYWORD: 1,
+    CATEGORY: 2
+  }
+};
+
+// Configuration constants
+const CONFIG = {
+  MAX_PROCESSING_ATTEMPTS: 3,
+  PAIRING_WINDOW_HOURS: 72,
+  PRICE_CACHE_MINUTES: 30,
+  BATCH_SIZE: 100,
+  MAX_LOG_ENTRIES: 10000,
+  DEFAULT_CATEGORY: 'UNCATEGORIZED',
+  CRYPTO_PRECISION_THRESHOLD: 0.01
+};
+
+// Email parsing patterns
+const EMAIL_PATTERNS = {
+  CIBC: {
+    PURCHASE: /You\s+made\s+a\s+\$([0-9.,]+)\s+purchase/i,
+    PAYMENT: /payment\s+of\s+\$([0-9.,]+)/i,
+    TRANSFER: /transfer.*\$([0-9.,]+)/i,
+    ACCOUNT: /account\s+ending\s+in\s+([0-9]+)/i
+  },
+  PC_FINANCIAL: {
+    PURCHASE: /purchase.*\$([0-9.,]+)/i,
+    PAYMENT: /payment.*\$([0-9.,]+)/i,
+    MERCHANT: /at\s+([^$]+)/i
+  },
+  INTERAC: {
+    ETRANSFER: /INTERAC.*e-Transfer/i,
+    AMOUNT: /\$([0-9.,]+)/,
+    RECIPIENT: /to\s+([^$]+?)(?:\s+has|$)/i,
+    SENDER: /from\s+([^$]+?)(?:\s+has|$)/i
+  },
+  WEALTHSIMPLE: {
+    INVESTMENT: /investment|deposit|withdrawal/i,
+    AMOUNT: /\$([0-9.,]+)/,
+    ACCOUNT: /account/i
+  }
+};
+
+// ===================== UTILITY FUNCTIONS =====================
+
 // Lowercase and normalize string utility
 function _lc(s) {
   return (s || '').toString().trim().toLowerCase();
 }
+
 // Generic normalize: trim, collapse whitespace, strip diacritics
 function _normalize(s) {
   if (s === null || s === undefined) return '';
@@ -30,7 +150,10 @@ function _toNumber(v) {
     return 0;
   }
 }
-// ...existing code...
+
+// ===================== CATEGORY LEARNING =====================
+
+// IMPROVED: Better category learning to avoid generic keywords
 function learnCategories() {
   try {
     const ss = _ss();
@@ -141,186 +264,8 @@ function learnCategories() {
     try { SpreadsheetApp.getUi().alert('Category learning failed: ' + error.message); } catch (e) {}
   }
 }
-/**
- * FINANCE AUTOMATION V8.00 - COMPREHENSIVE UPGRADE
- * ===============================================
- * 
- * Significant improvements in this version:
- * - Fixed category classification to avoid unhelpful/generic keywords
- * - Proper investment value aggregation for Wealthsimple accounts
- * - Enhanced dashboard with proper category recognition from manual entries
- * - Fixed SHIB and other small-decimal cryptocurrency price fetching
- * - Improved transfer recipient detection for Interac/PC Financial
- * - Added transaction review system for pending/unclear items
- * - Comprehensive error handling and recovery mechanisms
- * 
- * Last Updated: 2025-08-20
- * Author: jstreiffer310 (with AI assistance)
- */
 
-// ===================== CONFIGURATION & CONSTANTS =====================
-
-const SPREADSHEET_ID = '1-eUeYMTeKoz2bIkHS8Jc2J9vO0Bnl8y6aHXmXGdJqg8';
-
-// Sheet names
-const SHEET_NAMES = {
-  MAIN: 'Transactions',
-  ACCOUNTS: 'Accounts',
-  HOLDINGS: 'Holdings',
-  STAGING: 'Staging',
-  CATEGORIES: 'Categories',
-  NETWORTH: 'NetWorthHistory',
-  DASHBOARD: 'Dashboard',
-  CSV_IMPORT: 'CSV_Import',
-  AUDIT_LOG: 'AuditLog'
-};
-
-// Backwards-compatible single-value sheet name constants (legacy code uses these)
-const MAIN_SHEET_NAME = SHEET_NAMES.MAIN;
-const ACCOUNTS_SHEET_NAME = SHEET_NAMES.ACCOUNTS;
-const HOLDINGS_SHEET_NAME = SHEET_NAMES.HOLDINGS; // already defined earlier but keep alias
-const STAGING_SHEET_NAME = SHEET_NAMES.STAGING;
-const CATEGORIES_SHEET_NAME = SHEET_NAMES.CATEGORIES;
-const NETWORTH_SHEET_NAME = SHEET_NAMES.NETWORTH;
-const DASHBOARD_SHEET_NAME = SHEET_NAMES.DASHBOARD;
-const CSV_IMPORT_SHEET_NAME = SHEET_NAMES.CSV_IMPORT;
-const AUDIT_LOG_SHEET_NAME = SHEET_NAMES.AUDIT_LOG;
-
-// Column schemas - explicit indexing to prevent magic number issues
-const COLUMNS = {
-  TRANSACTIONS: {
-    DATE: 1,
-    AMOUNT: 2,
-    FROM: 3,
-    TO: 4,
-    BANK: 5,
-    NOTES: 6,
-    EMAIL_ID: 7,
-    CATEGORY: 8,
-    TYPE: 9,
-    FINGERPRINT: 10
-  },
-  ACCOUNTS: {
-    NAME: 1,
-    BALANCE: 2,
-    LAST_UPDATED: 3,
-    TYPE: 4
-  },
-  HOLDINGS: {
-    ACCOUNT: 1,
-    TICKER: 2,
-    SHARES: 3,
-    UNIT_PRICE_CAD: 4,     // Price per share/unit in CAD
-    TOTAL_VALUE_CAD: 5,    // Total value (price × shares) in CAD
-    LAST_UPDATED: 6
-  },
-  STAGING: {
-    DATE: 1,
-    AMOUNT: 2,
-    FROM: 3,
-    TO: 4,
-    BANK: 5,
-    EMAIL_ID: 6,
-    STAGED_AT: 7,
-    DIRECTION: 8,
-    STATUS: 9,
-    FINGERPRINT: 10
-  }
-};
-
-// Configuration constants
-const CONFIG = {
-  GMAIL_LABEL: 'Transfers',
-  GMAIL_LOOKBACK: 'newer_than:7d',
-  PAIRING_WINDOW_MS: 48 * 60 * 60 * 1000, // 48 hours
-  AMOUNT_TOLERANCE: 0.01,
-  STALE_CLEANUP_HOURS: 72, // Clean up staging entries after 72 hours
-  PIE_MODE: 'AMOUNT', // 'AMOUNT' or 'COUNT'
-  MAX_PROCESSING_ATTEMPTS: 3,
-  DASHBOARD_ANALYSIS_DAYS: 30,
-  CRYPTO_API_RATE_LIMIT: 300,
-  YAHOO_FINANCE_RATE_LIMIT: 200
-};
-
-// Account definitions - CRITICAL: Only these accounts get balance updates
-const MY_ACCOUNTS = [
-  'PC Financial',
-  'Wealthsimple RRSP', 
-  'Wealthsimple Crypto',
-  'Wealthsimple Cash',
-  'CIBC Aventura',
-  'CIBC Dividend'
-];
-
-// Account normalization aliases
-const ACCOUNT_ALIASES = {
-  'pc money': 'PC Financial',
-  'pc financial': 'PC Financial',
-  'aventura': 'CIBC Aventura',
-  'dividend': 'CIBC Dividend',
-  'rrsp': 'Wealthsimple RRSP',
-  'crypto': 'Wealthsimple Crypto',
-  'wealthsimple': 'Wealthsimple',
-  'cash': '' // CRITICAL: Empty string prevents "Cash" phantom accounts
-};
-
-// CSV Import profiles
-const CSV_PROFILES = [
-  {
-    name: 'CIBC Aventura Card',
-    identifyingKeyword: '4500********6271',
-    accountName: 'CIBC Aventura',
-    columnMap: { date: 1, description: 2, debit: 3, credit: 4 }
-  },
-  {
-    name: 'CIBC Dividend Card',
-    identifyingKeyword: '4505********2866',
-    accountName: 'CIBC Dividend',
-    columnMap: { date: 1, description: 2, debit: 3, credit: 4 }
-  },
-  {
-    name: 'PC Financial Cash Account',
-    identifyingKeyword: 'Card Holder Name',
-    accountName: 'PC Financial',
-    columnMap: { date: 4, description: 1, amount: 6 }
-  }
-];
-
-// Cryptocurrency mappings for API calls
-const CRYPTO_MAPPINGS = {
-  'BTC-USD': 'bitcoin',
-  'ETH-USD': 'ethereum',
-  'DOT-USD': 'polkadot',
-  'SOL-USD': 'solana',
-  'SHIB-USD': 'shiba-inu',
-  'ADA-USD': 'cardano',
-  'MATIC-USD': 'matic-network',
-  'DOGE-USD': 'dogecoin',
-  'BTC': 'bitcoin',
-  'ETH': 'ethereum',
-  'SHIB': 'shiba-inu'
-};
-
-// Extensive stopwords list for category learning
-const CATEGORY_STOPWORDS = new Set([
-  // Banking terms
-  'financial', 'cibc', 'amount', 'auto', 'logged', 'aventura', 'wealthsimple', 'money',
-  'pad', 'deposit', 'card', 'cash', 'credit', 'standalone', 'purchase', 'trade', 
-  'unknown', 'sender', 'interac', 'transfer', 'received', 'streiffer', 'been',
-  'automatically', 'deposited', 'bank', 'banking', 'charge', 'payment', 'bill', 
-  'etransfer', 'transaction', 'statement', 'balance', 'online', 'account', 'fee',
-  'service', 'interest', 'dividend', 'inc', 'ltd', 'corp', 'limited', 'llc',
-  'confirmation', 'receipt', 'monthly', 'annual', 'quarterly', 'processed',
-  'merchant', 'purchase', 'paid', 'paym', 'withdrawal', 'debit', 'credit',
-  
-  // Common English words
-  'from', 'with', 'your', 'for', 'and', 'the', 'has', 'was', 'you', 'have', 'this',
-  'that', 'are', 'had', 'not', 'been', 'were', 'they', 'but', 'also', 'their',
-  'will', 'would', 'should', 'could', 'when', 'where', 'what', 'which', 'who', 'whom',
-  'whose', 'how', 'why', 'because', 'though', 'although'
-]);
-
-// ===================== LOGGING FUNCTIONS (MOVED TO TOP) =====================
+// ===================== LOGGING FUNCTIONS =====================
 function _logInfo(message, context = {}) {
   const timestamp = new Date().toISOString();
   console.log(`[INFO] ${timestamp}: ${message}`);
@@ -1774,106 +1719,279 @@ function onOpen() {
 
 function onEdit(e) {
   try {
-      source = 'GOOGLEFINANCE';
-      price = 'Formula';
+    // Basic edit tracking for the Finance Automation V8 system
+    if (!e || !e.range) return;
+    
+    const sheet = e.range.getSheet();
+    const sheetName = sheet.getName();
+    
+    // Log significant edits to main transaction sheets
+    if (sheetName === SHEET_NAMES.MAIN || sheetName === SHEET_NAMES.ACCOUNTS || sheetName === SHEET_NAMES.HOLDINGS) {
+      _logInfo(`Manual edit in ${sheetName}`, {
+        range: e.range.getA1Notation(),
+        oldValue: e.oldValue,
+        value: e.value
+      });
     }
-    const yf = _fetchPriceYahooFinance(ticker);
-    if (yf && yf.price) {
-      source = 'Yahoo Finance';
-      price = yf.price;
-    }
-    const cg = _fetchPriceCoinGecko(ticker);
-    if (cg) {
-      source = 'CoinGecko';
-      price = cg;
-    }
-    results += `${ticker}: ${price} (${source})\n`;
-  }
-  SpreadsheetApp.getUi().alert(results);
-}
     
   } catch (error) {
-    console.error('Failed to create menu:', error);
-    
-    // Try to show a simple alert without complex logging
-    try {
-      SpreadsheetApp.getUi().alert(
-        'Finance Automation V6 Setup Error\n\n' +
-        'There was an issue setting up the system. Error: ' + error.message + '\n\n' +
-        'Please check the execution log for more details.'
-      );
-    } catch (alertError) {
-      // If even the alert fails, just log to console
-      console.error('Could not show error alert:', alertError);
-    }
+    _logError('Failed to process edit event', error);
   }
 }
 
-function onEdit(e) {
+// Improved helper for finding pending transactions that need review
+function reviewPendingTransactions() {
   try {
-    const range = e.range;
-    const sheet = range.getSheet();
-
-    // Handle manual account balance changes
-    if (
-      sheet.getName() === SHEET_NAMES.ACCOUNTS &&
-      range.getColumn() === COLUMNS.ACCOUNTS.BALANCE &&
-      range.getRow() > 1
-    ) {
-      const ss = _ss();
-      const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
-
-      const accountName = sheet.getRange(range.getRow(), COLUMNS.ACCOUNTS.NAME).getValue();
-      const oldValue = parseFloat(e.oldValue || 0);
-      const newValue = parseFloat(e.value || 0);
-      const difference = newValue - oldValue;
-
-      // Only log significant changes (> 1 cent)
-      if (Math.abs(difference) > 0.01) {
-        // Create adjustment transaction
-        const adjustmentTx = {
-          date: new Date(),
-          amount: difference,
-          fromAccount: difference < 0 ? accountName : 'Manual Adjustment',
-          toAccount: difference > 0 ? accountName : 'Manual Adjustment',
-          bank: 'Manual Correction',
-          emailId: `MANUAL-${Date.now()}`,
-          type: 'Manual Adjustment',
-          notes: `Balance manually adjusted: ${oldValue.toFixed(2)} → ${newValue.toFixed(2)}`
-        };
-
-        // Log the adjustment without double-adjusting the balance
-        const row = [
-          adjustmentTx.date,
-          adjustmentTx.amount,
-          adjustmentTx.fromAccount,
-          adjustmentTx.toAccount,
-          adjustmentTx.bank,
-          adjustmentTx.notes,
-          adjustmentTx.emailId,
-          'Manual',
-          adjustmentTx.type,
-          _generateFingerprint(adjustmentTx)
-        ];
-
-        txSheet.appendRow(row);
-
-        // Update the timestamp
-        sheet.getRange(range.getRow(), COLUMNS.ACCOUNTS.LAST_UPDATED).setValue(new Date());
-
-        _logInfo(`Manual adjustment logged for ${accountName}`, {
-          difference: difference,
-          oldValue: oldValue,
-          newValue: newValue
-        });
-      }
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const stagingSheet = ss.getSheetByName(SHEET_NAMES.STAGING);
+    
+    let pendingCount = 0;
+    let mainPending = [];
+    let stagingPending = [];
+    
+    // Check main transactions for pending ones
+    if (mainSheet && mainSheet.getLastRow() > 1) {
+      const data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, 
+                 Object.keys(COLUMNS.TRANSACTIONS).length).getValues();
+      
+      data.forEach((row, index) => {
+        const rowNum = index + 2;
+        const notes = _normalize(row[COLUMNS.TRANSACTIONS.NOTES - 1]);
+        
+        if (notes.toLowerCase().includes('pending') || 
+            _normalize(row[COLUMNS.TRANSACTIONS.TO - 1]).toLowerCase().includes('pending')) {
+          pendingCount++;
+          mainPending.push({
+            sheet: 'Transactions',
+            row: rowNum,
+            date: new Date(row[COLUMNS.TRANSACTIONS.DATE - 1]),
+            amount: row[COLUMNS.TRANSACTIONS.AMOUNT - 1],
+            description: `${row[COLUMNS.TRANSACTIONS.FROM - 1]} → ${row[COLUMNS.TRANSACTIONS.TO - 1]}`
+          });
+        }
+      });
     }
+    
+    // Check staging sheet for pending transactions
+    if (stagingSheet && stagingSheet.getLastRow() > 1) {
+      const data = stagingSheet.getRange(2, 1, stagingSheet.getLastRow() - 1, 
+                 Object.keys(COLUMNS.STAGING).length).getValues();
+      
+      data.forEach((row, index) => {
+        const rowNum = index + 2;
+        const status = _normalize(row[COLUMNS.STAGING.STATUS - 1]);
+        
+        if (status.toLowerCase().includes('pending')) {
+          pendingCount++;
+          stagingPending.push({
+            sheet: 'Staging',
+            row: rowNum,
+            date: new Date(row[COLUMNS.STAGING.DATE - 1]),
+            amount: row[COLUMNS.STAGING.AMOUNT - 1],
+            description: `${row[COLUMNS.STAGING.FROM - 1]} → ${row[COLUMNS.STAGING.TO - 1]}`
+          });
+        }
+      });
+    }
+    
+    // Sort all pending items by date (newest first)
+    const allPending = [...mainPending, ...stagingPending].sort((a, b) => b.date - a.date);
+    
+    if (allPending.length === 0) {
+      try { SpreadsheetApp.getUi().alert('No pending transactions found.'); } catch (e) {}
+      return;
+    }
+    
+    // Format list for display
+    const pendingList = allPending.map(item => 
+      `• ${item.sheet} Row ${item.row}: ${item.date.toLocaleDateString()} - ${item.amount} - ${item.description}`
+    ).join('\n');
+    
+    const message = `Found ${allPending.length} pending transactions that need review:\n\n${pendingList}`;
+    
+    try { SpreadsheetApp.getUi().alert(message); } catch (e) {}
+    _logInfo('Pending transaction review completed', { count: allPending.length });
+    
   } catch (error) {
-    _logError('Error in onEdit trigger', error);
+    _logError('Failed to review pending transactions', error);
+    try { SpreadsheetApp.getUi().alert('Failed to review pending transactions: ' + error.message); } catch (e) {}
+  }
+}
+
+// Test function to verify SHIB price fetching
+function testShibPriceFetch() {
+  try {
+    const price = _fetchCryptoPriceWithPrecision('SHIB-USD');
+    const message = `SHIB-USD price: $${price.toFixed(8)}`;
+    _logInfo(message);
+    try { SpreadsheetApp.getUi().alert(message); } catch (e) {}
+  } catch (error) {
+    _logError('Failed to fetch SHIB price', error);
+    try { SpreadsheetApp.getUi().alert('Failed to fetch SHIB price: ' + error.message); } catch (e) {}
   }
 }
 
 // ===================== MAIN PROCESSING FUNCTION =====================
+
+/**
+ * Main entry point for processing emails and updating financial data
+ * This function orchestrates the entire finance automation workflow
+ */
+function processFinanceEmails() {
+  try {
+    _logInfo('Starting finance automation workflow');
+    
+    // Initialize the system
+    _ensureSheetsAndHeaders();
+    
+    // Process new emails
+    const processed = _processFinanceEmails();
+    
+    // Update holdings and balances
+    updateHoldingsAndBalances();
+    
+    // Update net worth history
+    _updateNetWorthHistory();
+    
+    _logInfo(`Finance automation completed successfully. Processed ${processed} new transactions.`);
+    
+    try {
+      SpreadsheetApp.getUi().alert(`✅ Finance automation completed!\n\nProcessed ${processed} new transactions.`);
+    } catch (e) {
+      // UI not available (probably running from trigger)
+    }
+    
+    return processed;
+    
+  } catch (error) {
+    _logError('Finance automation workflow failed', error);
+    
+    try {
+      SpreadsheetApp.getUi().alert(`❌ Finance automation failed!\n\nError: ${error.message}\n\nCheck the AuditLog sheet for details.`);
+    } catch (e) {
+      // UI not available (probably running from trigger)
+    }
+    
+    throw error;
+  }
+}
+
+/**
+ * Process finance-related emails from Gmail
+ * Returns the number of new transactions processed
+ */
+function _processFinanceEmails() {
+  try {
+    const ss = _ss();
+    const stagingSheet = ss.getSheetByName(SHEET_NAMES.STAGING);
+    
+    let processedCount = 0;
+    
+    // Get recent emails from financial institutions
+    const queries = [
+      'from:cibc.com',
+      'from:pcfinancial.ca', 
+      'from:wealthsimple.com',
+      'from:interac.ca'
+    ];
+    
+    for (const query of queries) {
+      const threads = GmailApp.search(`${query} newer_than:7d`, 0, 50);
+      
+      for (const thread of threads) {
+        const messages = thread.getMessages();
+        
+        for (const message of messages) {
+          const messageDate = message.getDate();
+          const cutoffDate = new Date();
+          cutoffDate.setDate(cutoffDate.getDate() - 7);
+          
+          if (messageDate < cutoffDate) continue;
+          
+          const emailId = message.getId();
+          const subject = message.getSubject();
+          const body = message.getBody();
+          
+          // Check if we've already processed this email
+          if (_isEmailAlreadyProcessed(emailId)) {
+            continue;
+          }
+          
+          // Process based on sender
+          let result = null;
+          const sender = message.getFrom().toLowerCase();
+          
+          if (sender.includes('cibc.com')) {
+            result = _parseCibcEmail(message, subject, body, ss.getSheetByName(SHEET_NAMES.ACCOUNTS));
+          } else if (sender.includes('pcfinancial.ca')) {
+            result = _parsePcFinancialEmail(message, subject, body, ss.getSheetByName(SHEET_NAMES.ACCOUNTS));
+          } else if (sender.includes('wealthsimple.com')) {
+            result = _parseWealthsimpleEmail(message, subject, body, ss.getSheetByName(SHEET_NAMES.ACCOUNTS));
+          } else if (sender.includes('interac.ca')) {
+            result = _parseInteracEmail(message, subject, body, ss.getSheetByName(SHEET_NAMES.ACCOUNTS));
+          }
+          
+          if (result && result.length > 0) {
+            // Add transactions to staging
+            for (const transaction of result) {
+              transaction[COLUMNS.STAGING.EMAIL_ID - 1] = emailId;
+              stagingSheet.appendRow(transaction);
+              processedCount++;
+            }
+            
+            _logInfo(`Processed email from ${sender}`, { emailId, transactionCount: result.length });
+          }
+        }
+      }
+    }
+    
+    // Process staging transactions
+    if (processedCount > 0) {
+      _processStagingTransactions();
+    }
+    
+    return processedCount;
+    
+  } catch (error) {
+    _logError('Failed to process finance emails', error);
+    throw error;
+  }
+}
+
+/**
+ * Check if an email has already been processed
+ */
+function _isEmailAlreadyProcessed(emailId) {
+  try {
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const stagingSheet = ss.getSheetByName(SHEET_NAMES.STAGING);
+    
+    // Check main sheet
+    if (mainSheet && mainSheet.getLastRow() > 1) {
+      const emailIds = mainSheet.getRange(2, COLUMNS.TRANSACTIONS.EMAIL_ID, mainSheet.getLastRow() - 1, 1).getValues();
+      if (emailIds.some(row => row[0] === emailId)) {
+        return true;
+      }
+    }
+    
+    // Check staging sheet
+    if (stagingSheet && stagingSheet.getLastRow() > 1) {
+      const emailIds = stagingSheet.getRange(2, COLUMNS.STAGING.EMAIL_ID, stagingSheet.getLastRow() - 1, 1).getValues();
+      if (emailIds.some(row => row[0] === emailId)) {
+        return true;
+      }
+    }
+    
+    return false;
+    
+  } catch (error) {
+    _logError('Failed to check if email was processed', error);
+    return false; // Assume not processed to avoid missing transactions
+  }
+}
+
 // ===================== NET WORTH HISTORY UPDATE =====================
 function _updateNetWorthHistory() {
   try {
@@ -2352,7 +2470,7 @@ function runSystemDiagnostics() {
 
 function showConfiguration() {
   const config = `
-Current Finance Automation V6 Configuration
+Current Finance Automation V8 Configuration
 ${'='.repeat(45)}
 
 📊 SPREADSHEET: ${SPREADSHEET_ID}
@@ -2862,4 +2980,5 @@ try {
   console.error('Failed to initialize Finance Automation System:', error);
 }
 
-// ===================== END OF FINANCE AUTOMATION V6 =====================
+// ===================== END OF FINANCE AUTOMATION V8 =====================
+}
