@@ -1731,6 +1731,66 @@ function buildDashboard() {
   }
 }
 
+// Apply lightweight, idempotent conditional formatting and number/date formats
+function applyConditionalFormatting() {
+  try {
+    const ss = _ss();
+
+    // Transactions sheet formatting
+    const tx = ss.getSheetByName(SHEET_NAMES.MAIN);
+    if (tx) {
+      const txCols = Object.keys(COLUMNS.TRANSACTIONS).length;
+      tx.getRange(1, 1, 1, txCols).setFontWeight('bold').setBackground('#f0f0f0');
+      try { tx.setFrozenRows(1); } catch (e) {}
+      if (tx.getLastRow() >= 2) {
+        tx.getRange(2, COLUMNS.TRANSACTIONS.AMOUNT, tx.getLastRow() - 1, 1)
+          .setNumberFormat('$#,##0.00;[Red]-$#,##0.00');
+      }
+    }
+
+    // Accounts formatting
+    const acc = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+    if (acc) {
+      const accCols = Object.keys(COLUMNS.ACCOUNTS).length;
+      acc.getRange(1, 1, 1, accCols).setFontWeight('bold').setBackground('#f0f0f0');
+      try { acc.setFrozenRows(1); } catch (e) {}
+      if (acc.getLastRow() >= 2) {
+        acc.getRange(2, COLUMNS.ACCOUNTS.BALANCE, acc.getLastRow() - 1, 1)
+          .setNumberFormat('$#,##0.00;[Red]-$#,##0.00');
+      }
+    }
+
+    // Holdings formatting
+    const holdings = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    if (holdings) {
+      const hCols = Object.keys(COLUMNS.HOLDINGS).length;
+      holdings.getRange(1, 1, 1, hCols).setFontWeight('bold').setBackground('#f0f0f0');
+      try { holdings.setFrozenRows(1); } catch (e) {}
+      if (holdings.getLastRow() >= 2) {
+        holdings.getRange(2, COLUMNS.HOLDINGS.UNIT_PRICE_CAD, holdings.getLastRow() - 1, 1)
+          .setNumberFormat('$#,##0.00####');
+        holdings.getRange(2, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD, holdings.getLastRow() - 1, 1)
+          .setNumberFormat('$#,##0.00');
+      }
+    }
+
+    // Net worth formatting
+    const net = ss.getSheetByName(SHEET_NAMES.NETWORTH);
+    if (net) {
+      net.getRange(1, 1, 1, 2).setFontWeight('bold').setBackground('#f0f0f0');
+      try { net.setFrozenRows(1); } catch (e) {}
+      if (net.getLastRow() >= 2) {
+        net.getRange(2, 1, net.getLastRow() - 1, 1).setNumberFormat('yyyy-mm-dd');
+        net.getRange(2, 2, net.getLastRow() - 1, 1).setNumberFormat('$#,##0.00');
+      }
+    }
+
+    _logInfo('Conditional formatting applied');
+  } catch (error) {
+    _logError('Failed to apply conditional formatting', error);
+  }
+}
+
 // ===================== INDIVIDUAL PROCESSING FUNCTIONS =====================
 
 function processNewEmails() {
