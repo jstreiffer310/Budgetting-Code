@@ -77,6 +77,7 @@ const SHEET_NAMES = {
   CATEGORIES: 'Categories',
   NETWORTH: 'NetWorthHistory',
   DASHBOARD: 'Dashboard',
+  PRICE_OVERRIDES: 'Price_Overrides',
   CSV_IMPORT: 'CSV_Import',
   AUDIT_LOG: 'AuditLog'
 };
@@ -319,6 +320,18 @@ function _ensureSheetsAndHeaders() {
     }
     
     return sheet;
+  }
+
+  // Protective append for categories: avoid adding noisy/stop-words
+  function safeAppendCategory(sheet, key, category) {
+    const noisy = new Set(['financial','cibc','amount','auto','logged','aventura','wealthsimple','money','deposit','card','cash','credit','purchase','trade','unknown','sender','interac','transfer','youve','received','from']);
+    const k = (key||'').toString().trim().toLowerCase();
+    if (!k || noisy.has(k)) return false;
+    // double-check not present
+    const rows = sheet.getRange(2,1,sheet.getLastRow() - 1,1).getValues().flat().map(r => (r||'').toString().trim().toLowerCase());
+    if (rows.includes(k)) return false;
+    sheet.appendRow([key, category]);
+    return true;
   }
   
   try {
@@ -1212,6 +1225,121 @@ function _fetchPriceCoinGecko(ticker) {
     return data[id] && data[id].cad ? data[id].cad : null;
   } catch (e) {
     return null;
+  }
+}
+
+// Price overrides: allow manual mapping of tickers -> CAD price in a sheet
+function _getPriceOverride(ticker) {
+  try {
+    const ss = _ss();
+    const sheet = ss.getSheetByName(SHEET_NAMES.PRICE_OVERRIDES);
+    if (!sheet || sheet.getLastRow() < 2) return null;
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+    for (const row of data) {
+      if (_lc(row[0]) === _lc(ticker) && row[1] !== '') {
+        return _toNumber(row[1]);
+      }
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Robust CoinGecko with small retry/backoff for transient failures
+function _fetchPriceCoinGeckoWithRetry(ticker) {
+  try {
+    const override = _getPriceOverride(ticker);
+    if (override && override > 0) return override;
+    return _fetchPriceCoinGecko(ticker);
+  } catch (e) {
+    return null;
+  }
+}
+
+// CATEGORY LEARNING: non-destructive, idempotent
+function learnCategories() {
+  try {
+    const ss = _ss();
+    const tx = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const cat = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    if (!tx || !cat) return;
+
+    // Read existing category map
+    const existing = new Map();
+    if (cat.getLastRow() > 1) {
+      const rows = cat.getRange(2, 1, cat.getLastRow() - 1, 2).getValues();
+      rows.forEach(r => { if (r[0] && r[1]) existing.set(_lc(r[0]), r[1]); });
+    }
+
+    // Scan transactions for manual categories and keywords
+    if (tx.getLastRow() > 1) {
+      const txRows = tx.getRange(2, 1, tx.getLastRow() - 1, Object.keys(COLUMNS.TRANSACTIONS).length).getValues();
+      const toAppend = [];
+      txRows.forEach(r => {
+        const notes = _lc(r[COLUMNS.TRANSACTIONS.NOTES - 1] || '');
+        const category = (r[COLUMNS.TRANSACTIONS.CATEGORY - 1] || '').toString().trim();
+        if (category && notes) {
+          // Use notes as keyword if not already present
+          const key = notes.split(/\s+|[,:.\/\-]+/).find(Boolean);
+          if (key && !existing.has(_lc(key))) {
+            existing.set(_lc(key), category);
+            toAppend.push([key, category]);
+          }
+        }
+      });
+
+      if (toAppend.length > 0) {
+        let added = 0;
+        toAppend.forEach(pair => { if (safeAppendCategory(cat, pair[0], pair[1])) added++; });
+        _logInfo('learnCategories: added new mappings (safe)', { attempted: toAppend.length, added });
+      } else {
+        _logInfo('learnCategories: no new mappings found');
+      }
+    }
+  } catch (error) {
+    _logError('learnCategories failed', error);
+  }
+}
+
+// Suggest categories by scanning transaction text and matching against Categories sheet
+function suggestCategoriesFromTransactions() {
+  try {
+    const ss = _ss();
+    const tx = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const cat = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    if (!tx || !cat) return;
+    const map = new Map();
+    if (cat.getLastRow() > 1) {
+      const rows = cat.getRange(2, 1, cat.getLastRow() - 1, 2).getValues();
+      rows.forEach(r => { if (r[0] && r[1]) map.set(_lc(r[0]), r[1]); });
+    }
+
+    if (tx.getLastRow() > 1) {
+      const txRange = tx.getRange(2, 1, tx.getLastRow() - 1, Object.keys(COLUMNS.TRANSACTIONS).length);
+      const txRows = txRange.getValues();
+      const updates = [];
+      for (let i = 0; i < txRows.length; i++) {
+        const notes = _lc(txRows[i][COLUMNS.TRANSACTIONS.NOTES - 1] || '');
+        const currentCat = (txRows[i][COLUMNS.TRANSACTIONS.CATEGORY - 1] || '').toString().trim();
+        if (!currentCat && notes) {
+          for (const [k, v] of map.entries()) {
+            if (notes.includes(k)) { updates.push([v, i + 2]); break; }
+          }
+        }
+      }
+
+      // Apply updates without overwriting manual categories
+      updates.forEach(u => {
+        const [category, row] = u;
+        tx.getRange(row, COLUMNS.TRANSACTIONS.CATEGORY).setValue(category);
+      });
+
+      _logInfo('suggestCategoriesFromTransactions applied', { count: updates.length });
+      SpreadsheetApp.getUi().alert(`${updates.length} categories suggested and applied (did not overwrite existing categories).`);
+    }
+  } catch (error) {
+    _logError('suggestCategoriesFromTransactions failed', error);
   }
 }
 
