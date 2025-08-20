@@ -2,8 +2,7 @@
 function _lc(s) {
   return (s || '').toString().trim().toLowerCase();
 }
-// Sheet name constant for holdings
-const HOLDINGS_SHEET_NAME = 'Holdings';
+// ...existing code...
 function learnCategories() {
   // ...existing code...
   // This is a stub to prevent ReferenceError. Implement logic as needed.
@@ -53,6 +52,17 @@ const SHEET_NAMES = {
   CSV_IMPORT: 'CSV_Import',
   AUDIT_LOG: 'AuditLog'
 };
+
+// Backwards-compatible single-value sheet name constants (legacy code uses these)
+const MAIN_SHEET_NAME = SHEET_NAMES.MAIN;
+const ACCOUNTS_SHEET_NAME = SHEET_NAMES.ACCOUNTS;
+const HOLDINGS_SHEET_NAME = SHEET_NAMES.HOLDINGS; // already defined earlier but keep alias
+const STAGING_SHEET_NAME = SHEET_NAMES.STAGING;
+const CATEGORIES_SHEET_NAME = SHEET_NAMES.CATEGORIES;
+const NETWORTH_SHEET_NAME = SHEET_NAMES.NETWORTH;
+const DASHBOARD_SHEET_NAME = SHEET_NAMES.DASHBOARD;
+const CSV_IMPORT_SHEET_NAME = SHEET_NAMES.CSV_IMPORT;
+const AUDIT_LOG_SHEET_NAME = SHEET_NAMES.AUDIT_LOG;
 
 // Column schemas - explicit indexing to prevent magic number issues
 const COLUMNS = {
