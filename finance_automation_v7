@@ -1300,687 +1300,6 @@ function testPriceFetchingCAD() {
 // ===================== MENU SYSTEM & MAIN FUNCTIONS =====================
 function onOpen() {
   try {
-    const ss = _ss();
-    _ensureSheetsAndHeaders();
-    const menu = SpreadsheetApp.getUi()
-      .createMenu('💰 Finance Automation V6 (CAD Enhanced)')
-      .addItem('🔧 Setup Permissions', 'setupPermissions')
-      .addSeparator()
-      .addItem('🔄 Process All', 'processEverything')
-      .addSeparator()
-      .addItem('📊 Update Holdings & Balances (CAD)', 'updateHoldingsAndBalances')
-      .addItem('🔄 Manual Price Refresh (CAD)', 'manualPriceRefreshCAD')
-      .addItem('🧪 Test Price Fetching (CAD)', 'testPriceFetchingCAD')
-      .addSeparator()
-      .addItem('📧 Process New Emails', 'processNewEmails')
-      .addItem('🔗 Pair Staged Transfers', 'pairStagedTransfers')
-      .addSeparator()
-      .addItem('📈 Rebuild Dashboard', 'buildDashboard')
-      .addItem('🏷️ Learn Categories', 'learnCategories')
-      .addItem('💡 Suggest Categories', 'suggestCategoriesFromTransactions')
-      .addSeparator()
-      .addItem('📁 Import from CSV', 'importFromCsv')
-      .addItem('🎨 Apply Formatting', 'applyConditionalFormatting')
-      .addItem('🧹 Clean Stale Transactions', 'cleanupStaleTransactions')
-      .addSeparator()
-      .addItem('🛠️ System Diagnostics', 'runSystemDiagnostics')
-      .addItem('📋 Show Configuration', 'showConfiguration');
-    menu.addToUi();
-    _logInfo('Finance Automation V6 (CAD Enhanced) menu loaded successfully');
-  } catch (error) {
-    try {
-      SpreadsheetApp.getUi().alert(
-        'Finance Automation V6 Setup Error\n\n' +
-        'There was an issue setting up the system. Error: ' + error.message + '\n\n' +
-        'Please run the "Setup Permissions" function first.'
-      );
-    } catch (alertError) { }
-  }
-}
-
-function onEdit(e) {
-  try {
-    const range = e.range;
-    const sheet = range.getSheet();
-    
-    // Handle manual account balance changes
-    if (sheet.getName() === SHEET_NAMES.ACCOUNTS && 
-        range.getColumn() === COLUMNS.ACCOUNTS.BALANCE && 
-        range.getRow() > 1) {
-      
-      const ss = _ss();
-      const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
-      
-      const accountName = sheet.getRange(range.getRow(), COLUMNS.ACCOUNTS.NAME).getValue();
-      const oldValue = parseFloat(e.oldValue || 0);
-      const newValue = parseFloat(e.value || 0);
-      const difference = newValue - oldValue;
-      
-      // Only log significant changes (> 1 cent)
-      if (Math.abs(difference) > 0.01) {
-        // Create adjustment transaction
-        const adjustmentTx = {
-          date: new Date(),
-          amount: difference,
-          fromAccount: difference < 0 ? accountName : 'Manual Adjustment',
-          toAccount: difference > 0 ? accountName : 'Manual Adjustment',
-          bank: 'Manual Correction',
-          emailId: `MANUAL-${Date.now()}`,
-          type: 'Manual Adjustment',
-          notes: `Balance manually adjusted: ${oldValue.toFixed(2)} → ${newValue.toFixed(2)}`
-    if (!catSheet) {
-      catSheet = ss.insertSheet(SHEET_NAMES.CATEGORIES);
-      catSheet.appendRow(['Keyword', 'Category']);
-      catSheet.getRange(1, 1, 1, 2).setFontWeight('bold').setBackground('#f0f0f0');
-    }
-    
-    if (!txSheet || txSheet.getLastRow() < 2) {
-      SpreadsheetApp.getUi().alert('No transactions found for category suggestions');
-      return;
-    }
-    
-    const txData = txSheet.getRange(2, 1, txSheet.getLastRow() - 1, 6).getValues();
-    const merchantCounts = {};
-    const commonWords = new Set([
-      'payment', 'transfer', 'inc', 'ltd', 'corp', 'on', 'toronto', 
-      'thank', 'you', 'ltd/ltée', 'e-transfer', 'purchase', 'the', 'and', 'or',
-      'auto-logged', 'standalone', 'paired'
-    ]);
-    
-    // Extract potential merchants/keywords from TO field
-    txData.forEach(row => {
-      const toAccount = _lc(row[COLUMNS.TRANSACTIONS.TO - 1] || '');
-      const bank = _lc(row[COLUMNS.TRANSACTIONS.BANK - 1] || '');
-      const notes = _lc(row[COLUMNS.TRANSACTIONS.NOTES - 1] || '');
-      
-      const searchText = [toAccount, bank, notes].join(' ')
-        .replace(/internet banking|e-transfer from|payment thank you|external to/gi, '')
-        .replace(/[\*#\d-]/g, ' ')
-        .trim();
-      
-      const words = searchText.split(/\s+/)
-        .filter(word => 
-          word.length > 3 && 
-          !commonWords.has(word) && 
-          !/^\d+$/.test(word)
-        );
-      
-      words.forEach(word => {
-        merchantCounts[word] = (merchantCounts[word] || 0) + 1;
-      });
-    });
-    
-    // Get existing categories to avoid duplicates
-    const existingKeywords = catSheet.getLastRow() > 1 ? 
-      catSheet.getRange(2, 1, catSheet.getLastRow() - 1, 1).getValues()
-        .flat()
-        .map(k => _lc(k || '')) : [];
-    
-    // Add suggestions (merchants appearing more than once)
-    const suggestions = Object.entries(merchantCounts)
-      .filter(([merchant, count]) => 
-        count > 1 && 
-        !existingKeywords.includes(_lc(merchant))
-      )
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 25); // Limit to top 25
-    
-    let addedCount = 0;
-    suggestions.forEach(([merchant, count]) => {
-      catSheet.appendRow([merchant.toUpperCase(), '']);
-      addedCount++;
-    });
-    
-    SpreadsheetApp.getUi().alert(
-      `Added ${addedCount} category suggestions. ` +
-      'Please review and assign categories in the Categories sheet.'
-    );
-    
-    _logInfo(`Category suggestions completed: ${addedCount} suggestions added`);
-    
-  } catch (error) {
-    _logError('Failed to suggest categories', error);
-  }
-}
-
-// ===================== CSV IMPORT SYSTEM =====================
-
-function importFromCsv() {
-  try {
-    const ss = _ss();
-    const importSheet = ss.getSheetByName(SHEET_NAMES.CSV_IMPORT);
-    const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
-    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
-    
-    if (!importSheet || importSheet.getLastRow() < 2) {
-      SpreadsheetApp.getUi().alert('CSV Import sheet is empty. Please paste your CSV data first.');
-      return;
-    }
-    
-    const importData = importSheet.getDataRange().getValues();
-    
-    // Detect CSV profile
-    let detectedProfile = null;
-    const allText = importData.flat().join(' ').toLowerCase();
-    
-    for (const profile of CSV_PROFILES) {
-      if (allText.includes(profile.identifyingKeyword.toLowerCase())) {
-        detectedProfile = profile;
-        break;
-      }
-    }
-    
-    if (!detectedProfile) {
-      SpreadsheetApp.getUi().alert('Could not detect bank format from CSV data.');
-      return;
-    }
-    
-    // Get existing transactions for deduplication
-    const existingTxSet = new Set();
-    if (txSheet.getLastRow() > 1) {
-      const existingData = txSheet.getRange(2, 1, txSheet.getLastRow() - 1, 4).getValues();
-      existingData.forEach(row => {
-        const key = `${new Date(row[0]).toDateString()}|${parseFloat(row[1] || 0).toFixed(2)}|${row[2]}|${row[3]}`;
-        existingTxSet.add(key);
-      });
-    }
-    
-    let importedCount = 0;
-    let errors = 0;
-    
-    // Process each row
-    importData.forEach((row, index) => {
-      if (index === 0) return; // Skip headers
-      
-      try {
-        const cols = detectedProfile.columnMap;
-        let txDate, amount, description;
-        
-        // Parse date
-        const dateValue = row[cols.date - 1];
-        if (dateValue instanceof Date) {
-          txDate = dateValue;
-        } else if (typeof dateValue === 'string') {
-          // Handle various date formats
-          if (/\d{2}-\d{2}-\d{4}/.test(dateValue)) {
-            const parts = dateValue.split('-');
-            txDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-          } else {
-            txDate = new Date(dateValue);
-          }
-        }
-        
-        if (!txDate || isNaN(txDate.getTime())) return;
-        
-        // Parse amount
-        if (cols.amount) {
-          amount = parseFloat(row[cols.amount - 1] || 0);
-        } else {
-          const debit = parseFloat(row[cols.debit - 1] || 0);
-          const credit = parseFloat(row[cols.credit - 1] || 0);
-          amount = credit - debit;
-        }
-        
-        if (isNaN(amount) || amount === 0) return;
-        
-        // Get description
-        description = _normalize(row[cols.description - 1] || '');
-        if (!description) return;
-        
-        // Determine accounts
-        const fromAccount = amount < 0 ? _normalizeAccountName(detectedProfile.accountName) : 
-                           _normalizeAccountName(description);
-        const toAccount = amount > 0 ? _normalizeAccountName(detectedProfile.accountName) : 
-                         _normalizeAccountName(description);
-        
-        // Check for duplicates
-        const txKey = `${txDate.toDateString()}|${amount.toFixed(2)}|${fromAccount}|${toAccount}`;
-        if (existingTxSet.has(txKey)) return;
-        
-        // Create and commit transaction
-        const transaction = {
-          date: txDate,
-          amount: amount,
-          fromAccount: fromAccount,
-          toAccount: toAccount,
-          bank: `${detectedProfile.name} CSV Import`,
-          emailId: `CSV-${Date.now()}-${index}`,
-          type: 'CSV Import',
-          notes: `Imported from ${detectedProfile.name} CSV`
-        };
-        
-        _commitTransaction(transaction, txSheet, accountsSheet);
-        importedCount++;
-        
-      } catch (error) {
-        _logError(`Failed to process CSV row ${index}`, error);
-        errors++;
-      }
-    });
-    
-    // Clear import sheet
-    importSheet.clearContents();
-    
-    const message = `CSV Import completed!\n` +
-                   `Detected format: ${detectedProfile.name}\n` +
-                   `Imported ${importedCount} new transactions\n` +
-                   `Errors: ${errors}`;
-    
-    SpreadsheetApp.getUi().alert(message);
-    
-    _logInfo(`CSV import completed`, {
-      profile: detectedProfile.name,
-      imported: importedCount,
-      errors: errors
-    });
-    
-  } catch (error) {
-    _logError('Failed to import CSV', error);
-    SpreadsheetApp.getUi().alert('CSV import failed. Please check the logs.');
-  }
-}
-
-// ===================== DASHBOARD & REPORTING =====================
-
-function buildDashboard() {
-  try {
-    const ss = _ss();
-    const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
-    let dashSheet = ss.getSheetByName(SHEET_NAMES.DASHBOARD);
-    
-    // Clear existing dashboard
-    if (dashSheet) {
-      dashSheet.clear();
-      dashSheet.getCharts().forEach(chart => dashSheet.removeChart(chart));
-    } else {
-      dashSheet = ss.insertSheet(SHEET_NAMES.DASHBOARD, 0);
-    }
-    
-    // Dashboard header
-    dashSheet.getRange('A1').setValue('Financial Dashboard')
-      .setFontSize(18)
-      .setFontWeight('bold')
-      .setHorizontalAlignment('center');
-    
-    dashSheet.getRange('A2').setValue(`Last Updated: ${new Date().toLocaleString()}`)
-      .setFontSize(10)
-      .setFontStyle('italic');
-    
-    if (!txSheet || txSheet.getLastRow() < 2) {
-      dashSheet.getRange('A4').setValue('No transaction data available for dashboard');
-      return;
-    }
-    
-    // Analyze recent transactions
-    const txData = txSheet.getRange(2, 1, txSheet.getLastRow() - 1, Object.keys(COLUMNS.TRANSACTIONS).length).getValues();
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - CONFIG.DASHBOARD_ANALYSIS_DAYS);
-    
-    const categoryStats = {};
-    const expensesByCategory = {};
-    const incomeByMonth = {};
-    const expensesByMonth = {};
-    
-    txData.forEach(row => {
-      const date = new Date(row[COLUMNS.TRANSACTIONS.DATE - 1]);
-      const amount = parseFloat(row[COLUMNS.TRANSACTIONS.AMOUNT - 1] || 0);
-      const category = _normalize(row[COLUMNS.TRANSACTIONS.CATEGORY - 1]) || 'Uncategorized';
-      
-      if (isNaN(date.getTime()) || date < cutoffDate) return;
-      
-      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      
-      if (amount < 0) {
-        // Expenses
-        const absAmount = Math.abs(amount);
-        categoryStats[category] = (categoryStats[category] || 0) + 1;
-        expensesByCategory[category] = (expensesByCategory[category] || 0) + absAmount;
-        expensesByMonth[monthKey] = (expensesByMonth[monthKey] || 0) + absAmount;
-      } else {
-        // Income
-        incomeByMonth[monthKey] = (incomeByMonth[monthKey] || 0) + amount;
-      }
-    });
-    
-    // Create expense pie chart
-    const expenseData = CONFIG.PIE_MODE === 'COUNT' ? categoryStats : expensesByCategory;
-    const sortedExpenseData = Object.entries(expenseData)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8); // Top 8 categories
-    
-    if (sortedExpenseData.length > 0) {
-      const chartHeaders = [['Category', CONFIG.PIE_MODE === 'COUNT' ? 'Count' : 'Amount']];
-      const chartRows = sortedExpenseData.map(([category, value]) => [category, value]);
-      const chartTable = chartHeaders.concat(chartRows);
-      
-      // Place data in hidden columns
-      const dataRange = dashSheet.getRange(4, 15, chartTable.length, 2);
-      dataRange.setValues(chartTable);
-      
-      const pieTitle = CONFIG.PIE_MODE === 'COUNT' ? 
-        `Expenses by Category (Transaction Count - Last ${CONFIG.DASHBOARD_ANALYSIS_DAYS} Days)` :
-        `Expenses by Category (Amount - Last ${CONFIG.DASHBOARD_ANALYSIS_DAYS} Days)`;
-      
-      const pieChart = dashSheet.newChart()
-        .setChartType(Charts.ChartType.PIE)
-        .addRange(dataRange)
-        .setOption('title', pieTitle)
-        .setOption('titleTextStyle', {fontSize: 14, bold: true})
-        .setOption('legend', {position: 'right', textStyle: {fontSize: 10}})
-        .setOption('colors', ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'])
-        .setPosition(4, 1, 0, 0)
-        .build();
-      
-      dashSheet.insertChart(pieChart);
-      
-      // Hide data columns
-      dashSheet.hideColumns(15, 2);
-    }
-    
-    // Create income vs expenses trend chart
-    const monthlyData = {};
-    Object.keys(incomeByMonth).concat(Object.keys(expensesByMonth)).forEach(month => {
-      monthlyData[month] = {
-        income: incomeByMonth[month] || 0,
-        expenses: expensesByMonth[month] || 0
-      };
-    });
-    
-    const sortedMonths = Object.keys(monthlyData).sort();
-    
-    if (sortedMonths.length > 0) {
-      const trendHeaders = [['Month', 'Income', 'Expenses', 'Net']];
-      const trendRows = sortedMonths.map(month => [
-        month,
-        monthlyData[month].income,
-        monthlyData[month].expenses,
-        monthlyData[month].income - monthlyData[month].expenses
-      ]);
-      const trendTable = trendHeaders.concat(trendRows);
-      
-      const trendRange = dashSheet.getRange(4, 17, trendTable.length, 4);
-      trendRange.setValues(trendTable);
-      
-      const trendChart = dashSheet.newChart()
-        .setChartType(Charts.ChartType.COLUMN)
-        .addRange(trendRange)
-        .setOption('title', 'Income vs Expenses Trend')
-        .setOption('titleTextStyle', {fontSize: 14, bold: true})
-        .setOption('hAxis', {title: 'Month'})
-        .setOption('vAxis', {title: 'Amount ($)', format: '$#,###'})
-        .setOption('series', {
-          0: {color: '#4CAF50', type: 'columns'}, // Income
-          1: {color: '#FF5722', type: 'columns'}, // Expenses
-          2: {color: '#2196F3', type: 'line', targetAxisIndex: 1} // Net
-        })
-        .setPosition(24, 1, 0, 0)
-        .build();
-      
-      dashSheet.insertChart(trendChart);
-      
-      // Hide trend data columns
-      dashSheet.hideColumns(17, 4);
-    }
-    
-    // Add Net Worth chart if historical data exists
-    const nwSheet = ss.getSheetByName(SHEET_NAMES.NETWORTH);
-    if (nwSheet && nwSheet.getLastRow() > 1) {
-      const netWorthChart = dashSheet.newChart()
-        .setChartType(Charts.ChartType.LINE)
-        .addRange(nwSheet.getRange(1, 1, nwSheet.getLastRow(), 2))
-        .setOption('title', 'Net Worth Over Time')
-        .setOption('titleTextStyle', {fontSize: 14, bold: true})
-        .setOption('hAxis', {title: 'Date'})
-        .setOption('vAxis', {title: 'Net Worth ($)', format: '$#,###'})
-        .setOption('legend', {position: 'none'})
-        .setOption('colors', ['#9C27B0'])
-        .setPosition(44, 1, 0, 0)
-        .build();
-      
-      dashSheet.insertChart(netWorthChart);
-    }
-    
-    // Add summary statistics
-    _addDashboardSummary(dashSheet, txData, cutoffDate);
-    
-    _logInfo('Dashboard rebuilt successfully');
-    
-  } catch (error) {
-    _logError('Failed to build dashboard', error);
-  }
-}
-
-function _addDashboardSummary(dashSheet, txData, cutoffDate) {
-  try {
-    let totalIncome = 0;
-    let totalExpenses = 0;
-    let transactionCount = 0;
-    let largestExpense = 0;
-    let largestIncome = 0;
-    const categoryTotals = {};
-    
-    txData.forEach(row => {
-      const date = new Date(row[COLUMNS.TRANSACTIONS.DATE - 1]);
-      const amount = parseFloat(row[COLUMNS.TRANSACTIONS.AMOUNT - 1] || 0);
-      const category = _normalize(row[COLUMNS.TRANSACTIONS.CATEGORY - 1]) || 'Uncategorized';
-      
-      if (isNaN(date.getTime()) || date < cutoffDate) return;
-      
-      transactionCount++;
-      if (amount > 0) {
-        totalIncome += amount;
-        largestIncome = Math.max(largestIncome, amount);
-      } else {
-        const absAmount = Math.abs(amount);
-        totalExpenses += absAmount;
-        largestExpense = Math.max(largestExpense, absAmount);
-        categoryTotals[category] = (categoryTotals[category] || 0) + absAmount;
-      }
-    });
-    
-    const netFlow = totalIncome - totalExpenses;
-    const topCategory = Object.entries(categoryTotals)
-      .sort((a, b) => b[1] - a[1])[0];
-    
-    // Summary section
-    dashSheet.getRange('A60').setValue(`${CONFIG.DASHBOARD_ANALYSIS_DAYS}-Day Financial Summary`)
-      .setFontWeight('bold')
-      .setFontSize(14)
-      .setBackground('#e1f5fe');
-    
-    const summaryData = [
-      ['Total Income:', totalIncome, '$#,##0.00'],
-      ['Total Expenses:', totalExpenses, '$#,##0.00'],
-      ['Net Flow:', netFlow, '$#,##0.00'],
-      ['Largest Single Income:', largestIncome, '$#,##0.00'],
-      ['Largest Single Expense:', largestExpense, '$#,##0.00'],
-      ['Total Transactions:', transactionCount, '#,##0'],
-      ['Top Expense Category:', topCategory ? `${topCategory[0]} (${topCategory[1].toFixed(2)})` : 'N/A', '']
-    ];
-    
-    summaryData.forEach((item, index) => {
-      const row = 62 + index;
-      dashSheet.getRange(row, 1).setValue(item[0]).setFontWeight('bold');
-      dashSheet.getRange(row, 2).setValue(item[1]);
-      if (item[2]) {
-        dashSheet.getRange(row, 2).setNumberFormat(item[2]);
-      }
-      
-      // Color coding for net flow
-      if (item[0].includes('Net Flow')) {
-        const color = netFlow >= 0 ? '#4CAF50' : '#FF5722';
-        dashSheet.getRange(row, 2).setFontColor(color).setFontWeight('bold');
-      }
-    });
-    
-    // Add account balances summary
-    const ss = _ss();
-    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
-    if (accountsSheet && accountsSheet.getLastRow() > 1) {
-      dashSheet.getRange('D60').setValue('Account Balances')
-        .setFontWeight('bold')
-        .setFontSize(14)
-        .setBackground('#f3e5f5');
-      
-      const accountData = accountsSheet.getRange(2, 1, accountsSheet.getLastRow() - 1, 3).getValues();
-      let totalNetWorth = 0;
-      
-      accountData.forEach((row, index) => {
-        const accountName = row[0];
-        const balance = parseFloat(row[1] || 0);
-        const lastUpdated = row[2];
-        
-        const displayRow = 62 + index;
-        dashSheet.getRange(displayRow, 4).setValue(accountName);
-        dashSheet.getRange(displayRow, 5).setValue(balance).setNumberFormat('$#,##0.00');
-        dashSheet.getRange(displayRow, 6).setValue(lastUpdated).setNumberFormat('mm/dd/yyyy');
-        
-        // Color coding for balances
-        const color = balance >= 0 ? '#4CAF50' : '#FF5722';
-        dashSheet.getRange(displayRow, 5).setFontColor(color);
-        
-        totalNetWorth += balance;
-      });
-      
-      // Total net worth
-      const netWorthRow = 62 + accountData.length + 1;
-      dashSheet.getRange(netWorthRow, 4).setValue('TOTAL NET WORTH:')
-        .setFontWeight('bold')
-        .setBackground('#fff3e0');
-      dashSheet.getRange(netWorthRow, 5).setValue(totalNetWorth)
-        .setNumberFormat('$#,##0.00')
-        .setFontWeight('bold')
-        .setFontColor('#FF6F00')
-        .setBackground('#fff3e0');
-    }
-    
-  } catch (error) {
-    _logError('Failed to add dashboard summary', error);
-  }
-}
-
-function _updateNetWorthHistory() {
-  try {
-    const ss = _ss();
-    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
-    let nwSheet = ss.getSheetByName(SHEET_NAMES.NETWORTH);
-    
-    if (!nwSheet) {
-      nwSheet = ss.insertSheet(SHEET_NAMES.NETWORTH);
-      nwSheet.appendRow(['Date', 'Net Worth']);
-      nwSheet.getRange(1, 1, 1, 2).setFontWeight('bold').setBackground('#f0f0f0');
-    }
-    
-    if (!accountsSheet || accountsSheet.getLastRow() < 2) {
-      _logInfo('No account data for net worth calculation');
-      return;
-    }
-    
-    // Calculate total net worth
-    const balances = accountsSheet.getRange(2, COLUMNS.ACCOUNTS.BALANCE, 
-      accountsSheet.getLastRow() - 1, 1).getValues();
-    const totalNetWorth = balances.reduce((sum, row) => sum + parseFloat(row[0] || 0), 0);
-    
-    const today = new Date().toDateString();
-    const lastRow = nwSheet.getLastRow();
-    
-    // Update today's entry or add new one
-    if (lastRow > 1) {
-      const lastDate = new Date(nwSheet.getRange(lastRow, 1).getValue()).toDateString();
-      if (lastDate === today) {
-        // Update existing entry
-        nwSheet.getRange(lastRow, 2).setValue(totalNetWorth);
-      } else {
-        // Add new entry
-        nwSheet.appendRow([new Date(), totalNetWorth]);
-      }
-    } else {
-      // First entry
-      nwSheet.appendRow([new Date(), totalNetWorth]);
-    }
-    
-    // Format the net worth column
-    const nwColumn = nwSheet.getRange(2, 2, nwSheet.getLastRow() - 1, 1);
-    nwColumn.setNumberFormat('$#,##0.00');
-    
-    _logInfo(`Net worth updated: ${totalNetWorth.toFixed(2)}`);
-    
-  } catch (error) {
-    _logError('Failed to update net worth history', error);
-  }
-}
-
-// ===================== FORMATTING & CONDITIONAL FORMATTING =====================
-
-function applyConditionalFormatting() {
-  try {
-    const ss = _ss();
-    const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
-    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
-    
-    // Format transaction amounts
-    if (txSheet && txSheet.getLastRow() > 1) {
-      const txRange = txSheet.getRange(`B2:B${txSheet.getMaxRows()}`);
-      txSheet.clearConditionalFormatRules();
-      
-      const txRules = [
-        SpreadsheetApp.newConditionalFormatRule()
-          .whenNumberLessThan(0)
-          .setFontColor('#D32F2F')
-          .setBackground('#FFEBEE')
-          .setRanges([txRange])
-          .build(),
-        SpreadsheetApp.newConditionalFormatRule()
-          .whenNumberGreaterThan(0)
-          .setFontColor('#388E3C')
-          .setBackground('#E8F5E8')
-          .setRanges([txRange])
-          .build()
-      ];
-      
-      txSheet.setConditionalFormatRules(txRules);
-      
-      // Format amount column as currency
-      txRange.setNumberFormat('$#,##0.00');
-    }
-    
-    // Format account balances
-    if (accountsSheet && accountsSheet.getLastRow() > 1) {
-      const accRange = accountsSheet.getRange(`B2:B${accountsSheet.getMaxRows()}`);
-      accountsSheet.clearConditionalFormatRules();
-      
-      const accRules = [
-        SpreadsheetApp.newConditionalFormatRule()
-          .whenNumberLessThan(0)
-          .setBackground('#FFEBEE')
-          .setFontColor('#D32F2F')
-          .setRanges([accRange])
-          .build(),
-        SpreadsheetApp.newConditionalFormatRule()
-          .whenNumberGreaterThan(0)
-          .setBackground('#E8F5E8')
-          .setFontColor('#388E3C')
-          .setRanges([accRange])
-          .build()
-      ];
-      
-      accountsSheet.setConditionalFormatRules(accRules);
-      
-      // Format balance column as currency
-      accRange.setNumberFormat('$#,##0.00');
-    }
-    
-    _logInfo('Conditional formatting applied successfully');
-    
-  } catch (error) {
-    _logError('Failed to apply conditional formatting', error);
-  }
-}
-
-// ===================== MENU SYSTEM & MAIN FUNCTIONS =====================
-
-function onOpen() {
-  try {
     // First ensure sheets exist before any logging
     const ss = _ss();
     console.log('Spreadsheet accessed successfully');
@@ -2036,20 +1355,21 @@ function onEdit(e) {
   try {
     const range = e.range;
     const sheet = range.getSheet();
-    
+
     // Handle manual account balance changes
-    if (sheet.getName() === SHEET_NAMES.ACCOUNTS && 
-        range.getColumn() === COLUMNS.ACCOUNTS.BALANCE && 
-        range.getRow() > 1) {
-      
+    if (
+      sheet.getName() === SHEET_NAMES.ACCOUNTS &&
+      range.getColumn() === COLUMNS.ACCOUNTS.BALANCE &&
+      range.getRow() > 1
+    ) {
       const ss = _ss();
       const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
-      
+
       const accountName = sheet.getRange(range.getRow(), COLUMNS.ACCOUNTS.NAME).getValue();
       const oldValue = parseFloat(e.oldValue || 0);
       const newValue = parseFloat(e.value || 0);
       const difference = newValue - oldValue;
-      
+
       // Only log significant changes (> 1 cent)
       if (Math.abs(difference) > 0.01) {
         // Create adjustment transaction
@@ -2063,7 +1383,7 @@ function onEdit(e) {
           type: 'Manual Adjustment',
           notes: `Balance manually adjusted: ${oldValue.toFixed(2)} → ${newValue.toFixed(2)}`
         };
-        
+
         // Log the adjustment without double-adjusting the balance
         const row = [
           adjustmentTx.date,
@@ -2077,12 +1397,12 @@ function onEdit(e) {
           adjustmentTx.type,
           _generateFingerprint(adjustmentTx)
         ];
-        
+
         txSheet.appendRow(row);
-        
+
         // Update the timestamp
         sheet.getRange(range.getRow(), COLUMNS.ACCOUNTS.LAST_UPDATED).setValue(new Date());
-        
+
         _logInfo(`Manual adjustment logged for ${accountName}`, {
           difference: difference,
           oldValue: oldValue,
@@ -2090,7 +1410,6 @@ function onEdit(e) {
         });
       }
     }
-    
   } catch (error) {
     _logError('Error in onEdit trigger', error);
   }
@@ -2099,6 +1418,687 @@ function onEdit(e) {
 // ===================== MAIN PROCESSING FUNCTION =====================
 
 function processEverything() {
+  try {
+    _logInfo('=== Starting complete finance automation process ===');
+    
+    const startTime = new Date();
+    _ensureSheetsAndHeaders();
+    
+    // Step 1: Process new emails
+    _logInfo('Step 1: Processing new emails...');
+    _safeExecute(_processNewEmails, this);
+    
+    // Step 2: Clean up stale staged transactions
+    _logInfo('Step 2: Cleaning up stale transactions...');
+    _safeExecute(_cleanupStaleTransactions, this);
+    
+    // Step 3: Pair staged transfers
+    _logInfo('Step 3: Pairing staged transfers...');
+    _safeExecute(_pairStagedTransfers, this);
+    
+    // Step 4: Update holdings and account balances
+    _logInfo('Step 4: Updating holdings and balances...');
+    _safeExecute(updateHoldingsAndBalances, this);
+    
+    // Step 5: Learn and apply categories
+    _logInfo('Step 5: Learning categories...');
+    _safeExecute(learnCategories, this);
+    
+    // Step 6: Update net worth history
+    _logInfo('Step 6: Updating net worth history...');
+    _safeExecute(_updateNetWorthHistory, this);
+    
+    // Step 7: Rebuild dashboard
+    _logInfo('Step 7: Rebuilding dashboard...');
+    _safeExecute(buildDashboard, this);
+    
+    // Step 8: Apply formatting
+    _logInfo('Step 8: Applying formatting...');
+    _safeExecute(applyConditionalFormatting, this);
+    
+    const endTime = new Date();
+    const duration = Math.round((endTime - startTime) / 1000);
+    
+    _logInfo(`=== Finance automation process completed successfully in ${duration}s ===`);
+    
+    SpreadsheetApp.getUi().alert(
+      '✅ Finance automation completed successfully!\n\n' +
+      `Process completed in ${duration} seconds.\n` +
+      'Check the Dashboard sheet for updated charts and summaries.'
+    );
+    
+  } catch (error) {
+    _logError('Finance automation process failed', error);
+    SpreadsheetApp.getUi().alert(
+      '❌ Finance automation failed.\n\n' +
+      `Error: ${error.message}\n\n` +
+      'Please check the execution log for details.'
+    );
+  }
+}
+
+// ===================== INDIVIDUAL PROCESSING FUNCTIONS =====================
+
+function processNewEmails() {
+  try {
+    _processNewEmails();
+    SpreadsheetApp.getUi().alert('✅ New emails processed successfully!');
+  } catch (error) {
+    _logError('Failed to process new emails', error);
+    SpreadsheetApp.getUi().alert('❌ Failed to process new emails. Check logs.');
+  }
+}
+
+function pairStagedTransfers() {
+  try {
+    _pairStagedTransfers();
+    SpreadsheetApp.getUi().alert('✅ Staged transfers paired successfully!');
+  } catch (error) {
+    _logError('Failed to pair staged transfers', error);
+    SpreadsheetApp.getUi().alert('❌ Failed to pair staged transfers. Check logs.');
+  }
+}
+
+function cleanupStaleTransactions() {
+  try {
+    _cleanupStaleTransactions();
+    SpreadsheetApp.getUi().alert('✅ Stale transactions cleaned up successfully!');
+  } catch (error) {
+    _logError('Failed to cleanup stale transactions', error);
+    SpreadsheetApp.getUi().alert('❌ Failed to cleanup stale transactions. Check logs.');
+  }
+}
+
+// ===================== SYSTEM DIAGNOSTICS & UTILITIES =====================
+
+function runSystemDiagnostics() {
+  try {
+    const ss = _ss();
+    const diagnostics = [];
+    
+    // Check sheet integrity
+    Object.values(SHEET_NAMES).forEach(sheetName => {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) {
+        diagnostics.push(`❌ Missing sheet: ${sheetName}`);
+      } else {
+        diagnostics.push(`✅ Found sheet: ${sheetName} (${sheet.getLastRow()} rows)`);
+      }
+    });
+    
+    // Check for duplicate transactions
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    if (mainSheet && mainSheet.getLastRow() > 2) {
+      const data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, 7).getValues();
+      const seen = new Set();
+      let duplicates = 0;
+      
+      data.forEach((row, index) => {
+        const key = `${new Date(row[0]).toDateString()}|${parseFloat(row[1] || 0).toFixed(2)}|${row[2]}|${row[3]}`;
+        if (seen.has(key)) {
+          duplicates++;
+        } else {
+          seen.add(key);
+        }
+      });
+      
+      if (duplicates > 0) {
+        diagnostics.push(`⚠️ Found ${duplicates} potential duplicate transactions`);
+      } else {
+        diagnostics.push(`✅ No duplicate transactions found`);
+      }
+    }
+    
+    // Check account balance consistency
+    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+    if (accountsSheet && accountsSheet.getLastRow() > 1) {
+      const accountData = accountsSheet.getRange(2, 1, accountsSheet.getLastRow() - 1, 3).getValues();
+      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      let staleAccounts = 0;
+      
+      accountData.forEach(row => {
+        const lastUpdated = row[2] ? new Date(row[2]) : null;
+        if (!lastUpdated || lastUpdated < oneWeekAgo) {
+          staleAccounts++;
+        }
+      });
+      
+      if (staleAccounts > 0) {
+        diagnostics.push(`⚠️ ${staleAccounts} accounts haven't been updated in over a week`);
+      } else {
+        diagnostics.push(`✅ All accounts have recent updates`);
+      }
+    }
+    
+    // Check staging queue
+    const stagingSheet = ss.getSheetByName(SHEET_NAMES.STAGING);
+    if (stagingSheet && stagingSheet.getLastRow() > 1) {
+      const stagingCount = stagingSheet.getLastRow() - 1;
+      diagnostics.push(`ℹ️ ${stagingCount} transactions in staging queue`);
+    } else {
+      diagnostics.push(`✅ Staging queue is empty`);
+    }
+    
+    const report = `System Diagnostics Report\n${'='.repeat(30)}\n\n${diagnostics.join('\n')}\n\nGenerated: ${new Date().toLocaleString()}`;
+    
+    SpreadsheetApp.getUi().alert(report);
+    _logInfo('System diagnostics completed', { diagnosticsCount: diagnostics.length });
+    
+  } catch (error) {
+    _logError('Failed to run system diagnostics', error);
+    SpreadsheetApp.getUi().alert('❌ System diagnostics failed. Check logs.');
+  }
+}
+
+function showConfiguration() {
+  const config = `
+Current Finance Automation V6 Configuration
+${'='.repeat(45)}
+
+📊 SPREADSHEET: ${SPREADSHEET_ID}
+
+📧 EMAIL SETTINGS:
+• Gmail Label: ${CONFIG.GMAIL_LABEL}
+• Search Lookback: ${CONFIG.GMAIL_LOOKBACK}
+• Pairing Window: ${CONFIG.PAIRING_WINDOW_MS / (24 * 60 * 60 * 1000)} days
+• Stale Cleanup: ${CONFIG.STALE_CLEANUP_HOURS} hours
+
+🏦 MANAGED ACCOUNTS (${MY_ACCOUNTS.length}):
+${MY_ACCOUNTS.map(acc => `• ${acc}`).join('\n')}
+
+🔗 ACCOUNT ALIASES:
+${Object.entries(ACCOUNT_ALIASES).map(([alias, canonical]) => `• "${alias}" → ${canonical || '(prevents phantom account)'}`).join('\n')}
+
+📈 DASHBOARD:
+• Pie Chart Mode: ${CONFIG.PIE_MODE}
+• Analysis Period: ${CONFIG.DASHBOARD_ANALYSIS_DAYS} days
+• Max Processing Attempts: ${CONFIG.MAX_PROCESSING_ATTEMPTS}
+
+⚙️ PROCESSING:
+• Amount Tolerance: ${CONFIG.AMOUNT_TOLERANCE}
+
+🏢 CSV PROFILES (${CSV_PROFILES.length}):
+${CSV_PROFILES.map(p => `• ${p.name} (${p.identifyingKeyword})`).join('\n')}
+
+Generated: ${new Date().toLocaleString()}
+  `;
+  
+  SpreadsheetApp.getUi().alert(config);
+}
+
+// ===================== DATA VALIDATION & REPAIR =====================
+
+function validateDataIntegrity() {
+  try {
+    const ss = _ss();
+    const issues = [];
+    
+    // Validate transactions
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    if (mainSheet && mainSheet.getLastRow() > 1) {
+      const data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, Object.keys(COLUMNS.TRANSACTIONS).length).getValues();
+      
+      data.forEach((row, index) => {
+        const rowNum = index + 2;
+        
+        // Check for missing essential data
+        if (!row[COLUMNS.TRANSACTIONS.DATE - 1] || isNaN(new Date(row[COLUMNS.TRANSACTIONS.DATE - 1]).getTime())) {
+          issues.push(`Row ${rowNum}: Invalid or missing date`);
+        }
+        
+        if (isNaN(parseFloat(row[COLUMNS.TRANSACTIONS.AMOUNT - 1]))) {
+          issues.push(`Row ${rowNum}: Invalid or missing amount`);
+        }
+        
+        // Check for phantom "Cash" accounts
+        const fromAccount = _normalize(row[COLUMNS.TRANSACTIONS.FROM - 1]);
+        const toAccount = _normalize(row[COLUMNS.TRANSACTIONS.TO - 1]);
+        
+        if (_lc(fromAccount) === 'cash' || _lc(toAccount) === 'cash') {
+          issues.push(`Row ${rowNum}: Contains phantom "Cash" account`);
+        }
+        
+        // Check for missing fingerprints on newer transactions
+        if (!row[COLUMNS.TRANSACTIONS.FINGERPRINT - 1] && new Date(row[COLUMNS.TRANSACTIONS.DATE - 1]) > new Date('2024-01-01')) {
+          issues.push(`Row ${rowNum}: Missing transaction fingerprint`);
+        }
+      });
+    }
+    
+    // Validate accounts
+    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+    if (accountsSheet && accountsSheet.getLastRow() > 1) {
+      const accountData = accountsSheet.getRange(2, 1, accountsSheet.getLastRow() - 1, Object.keys(COLUMNS.ACCOUNTS).length).getValues();
+      
+      accountData.forEach((row, index) => {
+        const rowNum = index + 2;
+        const accountName = _normalize(row[COLUMNS.ACCOUNTS.NAME - 1]);
+        
+        // Check for phantom accounts
+        if (_lc(accountName) === 'cash' || !accountName) {
+          issues.push(`Account row ${rowNum}: Phantom or empty account name`);
+        }
+        
+        // Check for invalid balances
+        const balance = row[COLUMNS.ACCOUNTS.BALANCE - 1];
+        if (isNaN(parseFloat(balance))) {
+          issues.push(`Account row ${rowNum}: Invalid balance for ${accountName}`);
+        }
+      });
+    }
+    
+    // Validate holdings
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    if (holdingsSheet && holdingsSheet.getLastRow() > 1) {
+      const holdingsData = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, Object.keys(COLUMNS.HOLDINGS).length).getValues();
+      
+      holdingsData.forEach((row, index) => {
+        const rowNum = index + 2;
+        const shares = parseFloat(row[COLUMNS.HOLDINGS.SHARES - 1] || 0);
+        const price = parseFloat(row[COLUMNS.HOLDINGS.PRICE - 1] || 0);
+        const value = parseFloat(row[COLUMNS.HOLDINGS.VALUE - 1] || 0);
+        
+        // Check calculation consistency
+        if (shares && price && Math.abs((shares * price) - value) > 0.01) {
+          issues.push(`Holdings row ${rowNum}: Value calculation mismatch`);
+        }
+        
+        // Check for zero or negative shares (unusual)
+        if (shares <= 0) {
+          issues.push(`Holdings row ${rowNum}: Zero or negative shares`);
+        }
+      });
+    }
+    
+    const message = issues.length === 0 ? 
+      '✅ Data integrity validation passed - no issues found!' :
+      `⚠️ Found ${issues.length} data integrity issues:\n\n${issues.slice(0, 15).join('\n')}${issues.length > 15 ? '\n\n...and more. Check audit logs for full list.' : ''}`;
+    
+    if (issues.length > 0) {
+      _logWarning('Data integrity issues found', { issues: issues });
+    } else {
+      _logInfo('Data integrity validation passed');
+    }
+    
+    SpreadsheetApp.getUi().alert(message);
+    
+  } catch (error) {
+    _logError('Data integrity validation failed', error);
+    SpreadsheetApp.getUi().alert('❌ Data integrity validation failed. See logs for details.');
+  }
+}
+
+function repairCommonIssues() {
+  try {
+    const ss = _ss();
+    let repairsCount = 0;
+    
+    // Repair missing fingerprints
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    if (mainSheet && mainSheet.getLastRow() > 1) {
+      const data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, Object.keys(COLUMNS.TRANSACTIONS).length).getValues();
+      
+      data.forEach((row, index) => {
+        const rowNum = index + 2;
+        
+        if (!row[COLUMNS.TRANSACTIONS.FINGERPRINT - 1]) {
+          const transaction = {
+            date: row[COLUMNS.TRANSACTIONS.DATE - 1],
+            amount: row[COLUMNS.TRANSACTIONS.AMOUNT - 1],
+            fromAccount: row[COLUMNS.TRANSACTIONS.FROM - 1],
+            toAccount: row[COLUMNS.TRANSACTIONS.TO - 1]
+          };
+          
+          const fingerprint = _generateFingerprint(transaction);
+          mainSheet.getRange(rowNum, COLUMNS.TRANSACTIONS.FINGERPRINT).setValue(fingerprint);
+          repairsCount++;
+        }
+      });
+    }
+    
+    // Remove phantom "Cash" accounts
+    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+    if (accountsSheet && accountsSheet.getLastRow() > 1) {
+      const data = accountsSheet.getDataRange().getValues();
+      
+      for (let i = data.length - 1; i >= 1; i--) {
+        const accountName = _normalize(data[i][COLUMNS.ACCOUNTS.NAME - 1]);
+        if (_lc(accountName) === 'cash' || !accountName) {
+          accountsSheet.deleteRow(i + 1);
+          repairsCount++;
+        }
+      }
+    }
+    
+    SpreadsheetApp.getUi().alert(`✅ Repair completed!\n\n${repairsCount} issues fixed.`);
+    _logInfo(`Data repair completed: ${repairsCount} issues fixed`);
+    
+  } catch (error) {
+    _logError('Failed to repair data issues', error);
+    SpreadsheetApp.getUi().alert('❌ Data repair failed. Check logs.');
+  }
+}
+
+// ===================== BACKUP & RECOVERY =====================
+
+function createDataBackup() {
+  try {
+    const ss = _ss();
+    const backupName = `Finance_Backup_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+    
+    // Create backup copy
+    const backup = ss.copy(backupName);
+    const backupUrl = backup.getUrl();
+    
+    SpreadsheetApp.getUi().alert(
+      `✅ Backup created successfully!\n\n` +
+      `Backup Name: ${backupName}\n` +
+      `URL: ${backupUrl}`
+    );
+    
+    _logInfo('Data backup created', { backupName: backupName, backupUrl: backupUrl });
+    
+  } catch (error) {
+    _logError('Failed to create backup', error);
+    SpreadsheetApp.getUi().alert('❌ Backup creation failed. Check logs.');
+  }
+}
+
+// ===================== TESTING & DEVELOPMENT HELPERS =====================
+
+function testEmailParsing() {
+  try {
+    const threads = GmailApp.search(`label:${CONFIG.GMAIL_LABEL} newer_than:1d`);
+    
+    if (threads.length === 0) {
+      SpreadsheetApp.getUi().alert('No recent emails found with the specified label.');
+      return;
+    }
+    
+    let testResults = [];
+    let successCount = 0;
+    let totalCount = 0;
+    
+    threads.slice(0, 3).forEach(thread => { // Test first 3 threads
+      thread.getMessages().slice(0, 2).forEach(message => { // Test first 2 messages per thread
+        totalCount++;
+        
+        const from = message.getFrom();
+        const subject = message.getSubject();
+        const plainBody = message.getPlainBody();
+        const htmlBody = _htmlToText(message.getBody());
+        const body = plainBody + '\n' + htmlBody;
+        
+        testResults.push(`From: ${from}`);
+        testResults.push(`Subject: ${subject}`);
+        
+        let transaction = null;
+        const fromLower = _lc(from);
+        
+        if (fromLower.includes('cibc')) {
+          transaction = _parseCibcEmail(message, subject, body, null);
+        } else if (fromLower.includes('pcfinancial')) {
+          transaction = _parsePcFinancialEmail(message, subject, body);
+        } else if (fromLower.includes('payments.interac')) {
+          transaction = _parseInteracEmail(message, subject, body);
+        } else if (fromLower.includes('wealthsimple')) {
+          transaction = _parseWealthsimpleEmail(message, subject, body);
+        }
+        
+        if (transaction) {
+          testResults.push(`✅ Parsed: ${Math.abs(transaction.amount)} ${transaction.direction || 'N/A'} (${transaction.fromAccount} → ${transaction.toAccount})`);
+          successCount++;
+        } else {
+          testResults.push(`❌ Failed to parse`);
+        }
+        
+        testResults.push('---');
+      });
+    });
+    
+    testResults.push(`Summary: ${successCount}/${totalCount} emails parsed successfully`);
+    
+    const results = testResults.join('\n');
+    Logger.log(results);
+    SpreadsheetApp.getUi().alert(`Email parsing test completed.\n\nSummary: ${successCount}/${totalCount} emails parsed successfully.\n\nCheck execution logs for detailed results.`);
+    
+    _logInfo('Email parsing test completed', {
+      successCount: successCount,
+      totalCount: totalCount,
+      successRate: `${(successCount/totalCount*100).toFixed(1)}%`
+    });
+    
+  } catch (error) {
+    _logError('Email parsing test failed', error);
+    SpreadsheetApp.getUi().alert('Email parsing test failed. Check logs.');
+  }
+}
+
+// ===================== PERFORMANCE OPTIMIZATION =====================
+
+function optimizeSpreadsheet() {
+  try {
+    const ss = _ss();
+    let optimizations = 0;
+    
+    // Remove empty rows/columns from all sheets
+    Object.values(SHEET_NAMES).forEach(sheetName => {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) return;
+      
+      const lastRow = sheet.getLastRow();
+      const lastCol = sheet.getLastColumn();
+      const maxRows = sheet.getMaxRows();
+      const maxCols = sheet.getMaxColumns();
+      
+      // Remove excess rows (keep reasonable buffer)
+      if (maxRows > lastRow + 100 && maxRows > 1000) {
+        const rowsToDelete = Math.min(maxRows - lastRow - 100, maxRows - 1000);
+        if (rowsToDelete > 0) {
+          sheet.deleteRows(lastRow + 101, rowsToDelete);
+          optimizations++;
+        }
+      }
+      
+      // Remove excess columns (keep reasonable buffer)
+      if (maxCols > lastCol + 10 && maxCols > 26) {
+        const colsToDelete = Math.min(maxCols - lastCol - 10, maxCols - 26);
+        if (colsToDelete > 0) {
+          sheet.deleteColumns(lastCol + 11, colsToDelete);
+          optimizations++;
+        }
+      }
+    });
+    
+    SpreadsheetApp.getUi().alert(`✅ Optimization completed!\n\n${optimizations} optimizations applied.`);
+    _logInfo(`Spreadsheet optimization completed: ${optimizations} optimizations applied`);
+    
+  } catch (error) {
+    _logError('Failed to optimize spreadsheet', error);
+    SpreadsheetApp.getUi().alert('❌ Optimization failed. Check logs.');
+  }
+}
+
+// ===================== SECURITY & ACCESS CONTROL =====================
+
+function isAuthorizedUser() {
+  // Add authorized email addresses here
+  const authorizedUsers = [
+    // 'user@example.com'
+  ];
+  
+  const currentUser = Session.getActiveUser().getEmail();
+  
+  // If no authorized users specified, allow all (default behavior)
+  if (authorizedUsers.length === 0) {
+    return true;
+  }
+  
+  return authorizedUsers.includes(currentUser);
+}
+
+function checkAuthorization() {
+  if (!isAuthorizedUser()) {
+    const message = 'You are not authorized to use this finance automation system.';
+    SpreadsheetApp.getUi().alert(message);
+    _logWarning('Unauthorized access attempt', {
+      user: Session.getActiveUser().getEmail()
+    });
+    throw new Error(message);
+  }
+}
+
+// ===================== ERROR RECOVERY & EMERGENCY FUNCTIONS =====================
+
+function emergencyRecovery() {
+  try {
+    _logInfo('=== Starting emergency recovery ===');
+    
+    // Ensure all sheets exist
+    _ensureSheetsAndHeaders();
+    
+    // Clear any corrupted staging entries
+    const ss = _ss();
+    const stagingSheet = ss.getSheetByName(SHEET_NAMES.STAGING);
+    
+    if (stagingSheet && stagingSheet.getLastRow() > 1) {
+      const data = stagingSheet.getRange(2, 1, stagingSheet.getLastRow() - 1, Object.keys(COLUMNS.STAGING).length).getValues();
+      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      let clearedCount = 0;
+      
+      for (let i = data.length - 1; i >= 0; i--) {
+        const stagedAt = new Date(data[i][COLUMNS.STAGING.STAGED_AT - 1]);
+        if (stagedAt < oneWeekAgo || isNaN(stagedAt.getTime())) {
+          stagingSheet.deleteRow(i + 2);
+          clearedCount++;
+        }
+      }
+      
+      _logInfo(`Cleared ${clearedCount} corrupted/stale staging entries`);
+    }
+    
+    // Repair common data issues
+    repairCommonIssues();
+    
+    // Apply basic formatting
+    applyConditionalFormatting();
+    
+    // Update net worth
+    _updateNetWorthHistory();
+    
+    _logInfo('=== Emergency recovery completed ===');
+    
+    SpreadsheetApp.getUi().alert('✅ Emergency recovery completed!\n\nBasic functionality has been restored.');
+    
+  } catch (error) {
+    _logError('Emergency recovery failed', error);
+    SpreadsheetApp.getUi().alert('❌ Emergency recovery failed. Manual intervention required.');
+  }
+}
+
+// ===================== SCHEDULED TRIGGERS =====================
+
+function createScheduledTrigger() {
+  try {
+    // Delete existing triggers
+    ScriptApp.getProjectTriggers().forEach(trigger => {
+      if (trigger.getHandlerFunction() === 'processEverything') {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
+    
+    // Create new daily trigger
+    ScriptApp.newTrigger('processEverything')
+      .timeBased()
+      .everyDays(1)
+      .atHour(9) // Run at 9 AM
+      .create();
+    
+    SpreadsheetApp.getUi().alert('✅ Scheduled daily trigger created for 9:00 AM');
+    _logInfo('Scheduled trigger created');
+    
+  } catch (error) {
+    _logError('Failed to create scheduled trigger', error);
+    SpreadsheetApp.getUi().alert('❌ Failed to create scheduled trigger. Check logs.');
+  }
+}
+
+function deleteScheduledTriggers() {
+  try {
+    let deletedCount = 0;
+    ScriptApp.getProjectTriggers().forEach(trigger => {
+      if (trigger.getHandlerFunction() === 'processEverything') {
+        ScriptApp.deleteTrigger(trigger);
+        deletedCount++;
+      }
+    });
+    
+    SpreadsheetApp.getUi().alert(`✅ Deleted ${deletedCount} scheduled triggers`);
+    _logInfo(`Deleted ${deletedCount} scheduled triggers`);
+    
+  } catch (error) {
+    _logError('Failed to delete scheduled triggers', error);
+    SpreadsheetApp.getUi().alert('❌ Failed to delete scheduled triggers. Check logs.');
+  }
+}
+
+// ===================== SCRIPT METADATA & VERSION INFO =====================
+
+const SCRIPT_VERSION = '6.0.0';
+const SCRIPT_BUILD_DATE = '2024-08-19';
+const SCRIPT_FEATURES = [
+  'Robust Email Parsing (CIBC, PC Financial, Interac, Wealthsimple)',
+  'Advanced Staging/Pairing System with Configurable Windows',
+  'Fingerprint-based Duplicate Detection',
+  'Comprehensive Account Balance Management',
+  'Holdings Tracking with Automatic Price Updates',
+  'Category Learning with Multi-keyword Support',
+  'Configurable Dashboard with Multiple Chart Types',
+  'CSV Import with Auto-detection',
+  'Data Validation and Repair Tools',
+  'Comprehensive Audit Logging',
+  'Error Recovery and Emergency Functions',
+  'Performance Optimization Tools',
+  'Security and Access Control Features'
+];
+
+function showAbout() {
+  const about = `
+Finance Automation System V${SCRIPT_VERSION}
+${'='.repeat(40)}
+
+Build Date: ${SCRIPT_BUILD_DATE}
+Spreadsheet: ${SPREADSHEET_ID}
+
+FEATURES:
+${SCRIPT_FEATURES.map(f => `• ${f}`).join('\n')}
+
+AUTHOR: Advanced AI Assistant
+LICENSE: Internal Use Only
+
+This system provides comprehensive automation for personal
+finance tracking with robust error handling, data validation,
+and extensive logging capabilities.
+
+Generated: ${new Date().toLocaleString()}
+  `;
+  
+  SpreadsheetApp.getUi().alert(about);
+}
+
+// ===================== FINAL SYSTEM INITIALIZATION =====================
+
+// Ensure the system is properly initialized when the script loads
+try {
+  if (typeof SpreadsheetApp !== 'undefined') {
+    // Script is running in Google Apps Script environment
+    console.log(`Finance Automation V${SCRIPT_VERSION} loaded successfully`);
+  }
+} catch (error) {
+  console.error('Failed to initialize Finance Automation System:', error);
+}
+
+// ===================== END OF FINANCE AUTOMATION V6 =====================
   try {
     _logInfo('=== Starting complete finance automation process ===');
     
