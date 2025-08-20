@@ -1,3 +1,14 @@
+// Lowercase and normalize string utility
+function _lc(s) {
+  return (s || '').toString().trim().toLowerCase();
+}
+// Sheet name constant for holdings
+const HOLDINGS_SHEET_NAME = 'Holdings';
+function learnCategories() {
+  // ...existing code...
+  // This is a stub to prevent ReferenceError. Implement logic as needed.
+  _logInfo('learnCategories called (stub implementation)');
+}
 /**
  * FINANCE AUTOMATION V6 - ROBUST MERGED SYSTEM
  * ===========================================
