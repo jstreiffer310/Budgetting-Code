@@ -1230,8 +1230,8 @@ function updateHoldingsAndBalances() {
     console.log('Starting holdings and balances update...');
     const ss = _ss();
     _ensureSheetsAndHeaders();
-    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
-    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+  const holdingsSheet = ss.getSheetByName(HOLDINGS_SHEET_NAME);
+  const accountsSheet = ss.getSheetByName(ACCOUNTS_SHEET_NAME);
     if (!holdingsSheet || holdingsSheet.getLastRow() < 2) {
       console.log('Holdings sheet is empty, skipping update');
       return;
@@ -1343,7 +1343,7 @@ function updateHoldingsAndBalances() {
       return;
     }
 
-    const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, 3).getValues();
+  const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, 3).getValues();
     const usdToCad = _getUsdToCadRate();
     const accountTotals = {};
 
@@ -1581,6 +1581,26 @@ function onEdit(e) {
 }
 
 // ===================== MAIN PROCESSING FUNCTION =====================
+// ===================== NET WORTH HISTORY UPDATE =====================
+function _updateNetWorthHistory() {
+  try {
+    const ss = _ss();
+    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+    const networthSheet = ss.getSheetByName(SHEET_NAMES.NETWORTH);
+    if (!accountsSheet || !networthSheet) {
+      _logError('Missing Accounts or NetWorthHistory sheet');
+      return;
+    }
+    // Sum all account balances
+    const data = accountsSheet.getRange(2, 2, accountsSheet.getLastRow() - 1, 1).getValues();
+    const totalNetWorth = data.reduce((sum, row) => sum + (parseFloat(row[0]) || 0), 0);
+    // Append to NetWorthHistory sheet
+    networthSheet.appendRow([new Date(), totalNetWorth]);
+    _logInfo('Net worth history updated', { date: new Date(), netWorth: totalNetWorth });
+  } catch (error) {
+    _logError('Failed to update net worth history', error);
+  }
+}
 
 function processEverything() {
   try {
