@@ -1586,19 +1586,48 @@ function _updateNetWorthHistory() {
   try {
     const ss = _ss();
     const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
-    const networthSheet = ss.getSheetByName(SHEET_NAMES.NETWORTH);
-    if (!accountsSheet || !networthSheet) {
-      _logError('Missing Accounts or NetWorthHistory sheet');
+    let networthSheet = ss.getSheetByName(SHEET_NAMES.NETWORTH);
+    if (!accountsSheet) {
+      _logError('Missing Accounts sheet');
       return;
+    }
+    if (!networthSheet) {
+      networthSheet = ss.insertSheet(SHEET_NAMES.NETWORTH);
+      networthSheet.appendRow(['Date', 'Net Worth']);
+      networthSheet.getRange(1, 1, 1, 2).setFontWeight('bold');
+      _logInfo('NetWorthHistory sheet created and headers set');
+    }
+    // Ensure headers are present
+    const header = networthSheet.getRange(1, 1, 1, 2).getValues()[0];
+    if (header[0] !== 'Date' || header[1] !== 'Net Worth') {
+      networthSheet.getRange(1, 1, 1, 2).setValues([['Date', 'Net Worth']]);
+      networthSheet.getRange(1, 1, 1, 2).setFontWeight('bold');
+      _logInfo('NetWorthHistory headers corrected');
     }
     // Sum all account balances
     const data = accountsSheet.getRange(2, 2, accountsSheet.getLastRow() - 1, 1).getValues();
     const totalNetWorth = data.reduce((sum, row) => sum + (parseFloat(row[0]) || 0), 0);
-    // Append to NetWorthHistory sheet
-    networthSheet.appendRow([new Date(), totalNetWorth]);
-    _logInfo('Net worth history updated', { date: new Date(), netWorth: totalNetWorth });
+    // Avoid duplicate entry for today
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const lastRow = networthSheet.getLastRow();
+    let lastDate = null;
+    if (lastRow > 1) {
+      lastDate = networthSheet.getRange(lastRow, 1).getValue();
+      if (lastDate instanceof Date) {
+        lastDate.setHours(0,0,0,0);
+      }
+    }
+    if (!lastDate || lastDate.getTime() !== today.getTime()) {
+      networthSheet.appendRow([today, totalNetWorth]);
+      _logInfo('Net worth history updated', { date: today, netWorth: totalNetWorth });
+    } else {
+      networthSheet.getRange(lastRow, 2).setValue(totalNetWorth);
+      _logInfo('Net worth history overwritten for today', { date: today, netWorth: totalNetWorth });
+    }
   } catch (error) {
     _logError('Failed to update net worth history', error);
+    SpreadsheetApp.getUi().alert('❌ Net worth history update failed. See logs.');
   }
 }
 
