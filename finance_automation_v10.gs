@@ -395,10 +395,8 @@ function _setupInitialSheets(ss) {
         // Create new sheet
         sheet = ss.insertSheet(sheetName);
         _logInfo(`Created new sheet: ${sheetName}`);
-      }
-      
-      // Set headers if sheet is empty or has no headers
-      if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '') {
+        
+        // Set headers for new sheet
         sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
         sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
         
@@ -407,29 +405,21 @@ function _setupInitialSheets(ss) {
           sheet.autoResizeColumn(i);
         }
         
-        _logInfo(`Set headers for sheet: ${sheetName}`);
-      }
-      
-      // Apply specific formatting for certain sheets
-      if (sheetName === SHEET_NAMES.MAIN || sheetName === SHEET_NAMES.STAGING) {
-        // Format amount columns as currency
-        if (sheet.getLastRow() > 1) {
-          sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).setNumberFormat('$#,##0.00');
-        }
-      }
-      
-      if (sheetName === SHEET_NAMES.HOLDINGS) {
-        // Format price and value columns
-        if (sheet.getLastRow() > 1) {
-          sheet.getRange(2, 4, sheet.getLastRow() - 1, 1).setNumberFormat('$#,##0.00'); // Current Price
-          sheet.getRange(2, 5, sheet.getLastRow() - 1, 1).setNumberFormat('$#,##0.00'); // Current Value
-        }
-      }
-      
-      if (sheetName === SHEET_NAMES.ACCOUNTS) {
-        // Format balance column
-        if (sheet.getLastRow() > 1) {
-          sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).setNumberFormat('$#,##0.00');
+        _logInfo(`Set headers for new sheet: ${sheetName}`);
+      } else {
+        // Sheet exists - only set headers if row 1 is completely empty
+        const firstRowRange = sheet.getRange(1, 1, 1, headers.length);
+        const firstRowValues = firstRowRange.getValues()[0];
+        
+        // Check if all cells in first row are empty
+        const isEmpty = firstRowValues.every(cell => !cell || cell.toString().trim() === '');
+        
+        if (isEmpty) {
+          firstRowRange.setValues([headers]);
+          firstRowRange.setFontWeight('bold').setBackground('#f0f0f0');
+          _logInfo(`Set headers for existing empty sheet: ${sheetName}`);
+        } else {
+          _logInfo(`Sheet ${sheetName} already has headers - preserving existing data`);
         }
       }
     }
@@ -853,13 +843,13 @@ function _parseInteracEmail(message, subject, body) {
   };
 }
 
-// IMPROVED: Wealthsimple Email Parser with better account detection
+// ENHANCED: Wealthsimple Email Parser with holdings integration
 function _parseWealthsimpleEmail(message, subject, body) {
   const subjectLower = _lc(subject);
   const bodyLower = _lc(body);
   
-  // Deposit confirmation
-  if (subjectLower.includes('deposit') || /added money|deposit.*confirmed/i.test(bodyLower)) {
+  // 1. DEPOSIT/CONTRIBUTION CONFIRMATION
+  if (subjectLower.includes('deposit') || /added money|deposit.*confirmed|contribution/i.test(bodyLower)) {
     const amount = _extractAmount(body, /amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) || _extractAmount(subject) || _extractAmount(body);
                    
     if (!amount) return null;
@@ -878,15 +868,24 @@ function _parseWealthsimpleEmail(message, subject, body) {
       targetAccount = 'Wealthsimple TFSA';
     }
     
-    return {
+    // Parse any holdings data included in contribution emails
+    const holdingsData = _parseWealthsimpleHoldingsFromEmail(body);
+    
+    const transaction = {
       date: message.getDate(), amount: amount, direction: 'IN', fromAccount: 'PC Financial',
       toAccount: targetAccount, bank: 'Wealthsimple Deposit', emailId: message.getId(),
-      type: 'Deposit', shouldPair: true, notes: `Deposit to ${targetAccount}`
+      type: 'Investment Contribution', shouldPair: true, notes: `Contribution to ${targetAccount}`
     };
+    
+    if (holdingsData.length > 0) {
+      transaction.holdings = holdingsData;
+    }
+    
+    return transaction;
   }
   
-  // Trade execution
-  if (subjectLower.includes('order has been filled') || /shares of/i.test(bodyLower)) {
+  // 2. TRADE EXECUTION
+  if (subjectLower.includes('order has been filled') || /shares of|purchased|bought/i.test(bodyLower)) {
     const tradeMatch = body.match(/(\d+[\d.,]*)\s+shares\s+of\s+([A-Z\.\-]+)[\s\S]+?total cost[:\s]*\$([0-9,]+\.[0-9]+)/i);
     
     if (!tradeMatch) return null;
@@ -908,17 +907,334 @@ function _parseWealthsimpleEmail(message, subject, body) {
       targetAccount = 'Wealthsimple TFSA';
     }
     
-    // Update holdings (will be implemented in holdings management section)
-    _updateHoldingsQuantity(targetAccount, ticker, shares);
+    // Update holdings immediately
+    setTimeout(() => _updateHoldingsFromTrade(targetAccount, ticker, shares, cost), 1000);
     
     return {
       date: message.getDate(), amount: -cost, direction: 'TRADE', fromAccount: targetAccount,
       toAccount: targetAccount, bank: 'Wealthsimple Trade', emailId: message.getId(),
-      type: 'Trade', notes: `Bought ${shares} shares of ${ticker}`, tradeInfo: { ticker, shares, cost }
+      type: 'Investment Purchase', notes: `Bought ${shares} shares of ${ticker}`, 
+      tradeInfo: { ticker, shares, cost }
     };
   }
   
+  // 3. PORTFOLIO SUMMARY/STATEMENT EMAILS
+  if (subjectLower.includes('portfolio') || subjectLower.includes('statement') || subjectLower.includes('summary')) {
+    const holdingsData = _parseWealthsimpleHoldingsFromEmail(body);
+    
+    if (holdingsData.length > 0) {
+      // Process holdings update
+      setTimeout(() => _updateAllHoldingsFromEmail(holdingsData), 1000);
+      
+      return {
+        date: message.getDate(), amount: 0, direction: 'INFO', fromAccount: 'Wealthsimple',
+        toAccount: 'Portfolio Update', bank: 'Wealthsimple Portfolio', emailId: message.getId(),
+        type: 'Portfolio Update', notes: `Portfolio summary with ${holdingsData.length} holdings`,
+        holdings: holdingsData
+      };
+    }
+  }
+  
+  // 4. DIVIDEND/DISTRIBUTION
+  if (subjectLower.includes('dividend') || subjectLower.includes('distribution')) {
+    const dividendMatch = body.match(/(?:dividend|distribution).*?\$([0-9,]+\.[0-9]+)/i);
+    if (dividendMatch) {
+      const amount = parseFloat(dividendMatch[1].replace(/,/g, ''));
+      
+      return {
+        date: message.getDate(), amount: amount, direction: 'IN', fromAccount: 'Investment Dividends',
+        toAccount: 'Wealthsimple Cash', bank: 'Wealthsimple Dividend', emailId: message.getId(),
+        type: 'Dividend/Distribution', notes: `Dividend/distribution payment`
+      };
+    }
+  }
+  
   return null;
+}
+
+// Parse holdings data from Wealthsimple emails
+function _parseWealthsimpleHoldingsFromEmail(emailBody) {
+  const holdings = [];
+  
+  try {
+    // Pattern 1: Table format "Symbol | Shares | Price | Market Value"
+    const tablePattern = /(?:Symbol|Ticker)[\s\|]*Shares[\s\|]*(?:Unit )?Price[\s\|]*(?:Market )?Value([\s\S]*?)(?:\n\s*\n|Total|Summary|$)/i;
+    const tableMatch = emailBody.match(tablePattern);
+    
+    if (tableMatch) {
+      const tableContent = tableMatch[1];
+      const lines = tableContent.split(/[\n\r]+/).filter(line => line.trim() && !line.match(/^\s*[-\|=]+\s*$/));
+      
+      for (const line of lines) {
+        // Enhanced pattern matching for different formats
+        let match = line.match(/([A-Z]{2,5}(?:\.TO)?)\s*\|?\s*([0-9,]+\.?\d*)\s*\|?\s*\$?([0-9,]+\.?\d+)\s*\|?\s*\$?([0-9,]+\.?\d+)/i);
+        
+        if (!match) {
+          // Alternative pattern without pipes
+          match = line.match(/([A-Z]{2,5}(?:\.TO)?)\s+([0-9,]+\.?\d*)\s+\$?([0-9,]+\.?\d+)\s+\$?([0-9,]+\.?\d+)/i);
+        }
+        
+        if (match) {
+          const ticker = match[1].trim();
+          const shares = parseFloat(match[2].replace(/,/g, ''));
+          const price = parseFloat(match[3].replace(/,/g, ''));
+          const value = parseFloat(match[4].replace(/,/g, ''));
+          
+          holdings.push({
+            ticker: ticker,
+            shares: shares,
+            price: price,
+            value: value,
+            account: 'Wealthsimple'
+          });
+        }
+      }
+    }
+    
+    // Pattern 2: Crypto holdings (for high precision coins like SHIB)
+    const cryptoPattern = /(BTC|ETH|DOT|SOL|SHIB)\s*[:,]?\s*([0-9,]+\.?\d*)\s*(?:coins?|shares?)\s*@?\s*\$?([0-9,]+\.?\d+)/gi;
+    let cryptoMatch;
+    while ((cryptoMatch = cryptoPattern.exec(emailBody)) !== null) {
+      const symbol = cryptoMatch[1].toUpperCase();
+      const shares = parseFloat(cryptoMatch[2].replace(/,/g, ''));
+      const price = parseFloat(cryptoMatch[3].replace(/,/g, ''));
+      
+      holdings.push({
+        ticker: symbol + '-USD',
+        shares: shares,
+        price: price,
+        value: shares * price,
+        account: 'Wealthsimple'
+      });
+    }
+    
+    // Pattern 3: Individual line format "TICKER: X.XX shares at $Y.YY"
+    const individualPattern = /([A-Z]{2,5}(?:\.TO)?)\s*:\s*([0-9,]+\.?\d*)\s*(?:shares?|units?)\s*(?:at\s*)?\$?([0-9,]+\.?\d+)/gi;
+    let individualMatch;
+    while ((individualMatch = individualPattern.exec(emailBody)) !== null) {
+      const ticker = individualMatch[1].trim();
+      const shares = parseFloat(individualMatch[2].replace(/,/g, ''));
+      const price = parseFloat(individualMatch[3].replace(/,/g, ''));
+      
+      holdings.push({
+        ticker: ticker,
+        shares: shares,
+        price: price,
+        value: shares * price,
+        account: 'Wealthsimple'
+      });
+    }
+    
+  } catch (error) {
+    _logError('Failed to parse Wealthsimple holdings from email', error);
+  }
+  
+  return holdings;
+}
+
+// ===================== HOLDINGS UPDATE FUNCTIONS =====================
+
+function _updateHoldingsFromTrade(account, ticker, shares, cost) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    
+    if (!holdingsSheet) {
+      _logError('Holdings sheet not found for trade update');
+      return;
+    }
+    
+    // Find existing holding row
+    const existingRow = _findHoldingRow(holdingsSheet, ticker);
+    
+    if (existingRow > 0) {
+      // Update existing holding
+      const currentShares = parseFloat(holdingsSheet.getRange(existingRow, 2).getValue() || 0);
+      const newShares = currentShares + shares;
+      
+      // Update shares
+      holdingsSheet.getRange(existingRow, 2).setValue(newShares);
+      
+      // Update cost basis (weighted average)
+      const currentCostBasis = parseFloat(holdingsSheet.getRange(existingRow, 3).getValue() || 0);
+      const totalCurrentValue = currentCostBasis * currentShares;
+      const newCostBasis = (totalCurrentValue + cost) / newShares;
+      holdingsSheet.getRange(existingRow, 3).setValue(newCostBasis);
+      
+      // Update last updated
+      holdingsSheet.getRange(existingRow, 7).setValue(new Date());
+      
+      _logInfo(`Updated ${ticker}: ${currentShares} + ${shares} = ${newShares} shares, new cost basis: ${newCostBasis.toFixed(4)}`);
+      
+    } else {
+      // Add new holding
+      const newRow = [
+        ticker,                    // Column A: Ticker
+        shares,                    // Column B: Shares
+        cost / shares,             // Column C: Cost Basis (price per share)
+        '',                        // Column D: Current Price (to be fetched)
+        '',                        // Column E: Current Value (to be calculated)
+        account,                   // Column F: Account
+        new Date()                 // Column G: Last Updated
+      ];
+      
+      holdingsSheet.appendRow(newRow);
+      _logInfo(`Added new holding: ${ticker} - ${shares} shares at ${(cost/shares).toFixed(4)} per share`);
+    }
+    
+    // Immediately refresh price for this holding
+    setTimeout(() => _refreshSingleHolding(ticker), 2000);
+    
+  } catch (error) {
+    _logError('Failed to update holdings from trade', error, { ticker, shares, cost });
+  }
+}
+
+function _updateAllHoldingsFromEmail(holdingsData) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    
+    if (!holdingsSheet || !holdingsData || holdingsData.length === 0) {
+      _logInfo('No holdings data to update from email');
+      return;
+    }
+    
+    let updatedCount = 0;
+    
+    for (const holding of holdingsData) {
+      const existingRow = _findHoldingRow(holdingsSheet, holding.ticker);
+      
+      if (existingRow > 0) {
+        // Update existing holding shares and price if provided
+        if (holding.shares !== undefined) {
+          holdingsSheet.getRange(existingRow, 2).setValue(holding.shares);
+        }
+        if (holding.price !== undefined && holding.price > 0) {
+          holdingsSheet.getRange(existingRow, 4).setValue(holding.price);
+        }
+        if (holding.value !== undefined && holding.value > 0) {
+          holdingsSheet.getRange(existingRow, 5).setValue(holding.value);
+        }
+        
+        holdingsSheet.getRange(existingRow, 7).setValue(new Date());
+        updatedCount++;
+        
+        _logInfo(`Updated holding from email: ${holding.ticker} - ${holding.shares} shares`);
+        
+      } else {
+        // Add new holding if it doesn't exist
+        const newRow = [
+          holding.ticker,
+          holding.shares || 0,
+          '',  // Cost basis to be calculated
+          holding.price || '',
+          holding.value || '',
+          holding.account || 'Wealthsimple',
+          new Date()
+        ];
+        
+        holdingsSheet.appendRow(newRow);
+        updatedCount++;
+        
+        _logInfo(`Added new holding from email: ${holding.ticker} - ${holding.shares} shares`);
+      }
+      
+      // Apply special formatting for SHIB
+      if (holding.ticker.includes('SHIB')) {
+        const currentRow = existingRow > 0 ? existingRow : holdingsSheet.getLastRow();
+        holdingsSheet.getRange(currentRow, 2).setNumberFormat('0.000000'); // Shares
+        holdingsSheet.getRange(currentRow, 4).setNumberFormat('0.00000000'); // Price
+      }
+    }
+    
+    _logInfo(`Holdings update from email completed: ${updatedCount} holdings processed`);
+    
+  } catch (error) {
+    _logError('Failed to update holdings from email', error);
+  }
+}
+
+function _refreshSingleHolding(ticker) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    
+    if (!holdingsSheet) return;
+    
+    const existingRow = _findHoldingRow(holdingsSheet, ticker);
+    if (existingRow <= 0) return;
+    
+    // Get current shares
+    const shares = parseFloat(holdingsSheet.getRange(existingRow, 2).getValue() || 0);
+    if (shares <= 0) return;
+    
+    // Fetch current price
+    const price = _fetchPriceFromAPI(ticker);
+    
+    if (price > 0) {
+      const currentValue = shares * price;
+      
+      holdingsSheet.getRange(existingRow, 4).setValue(price);      // Current Price
+      holdingsSheet.getRange(existingRow, 5).setValue(currentValue); // Current Value
+      holdingsSheet.getRange(existingRow, 7).setValue(new Date());   // Last Updated
+      
+      // Apply special formatting for SHIB
+      if (ticker.includes('SHIB') && price < 0.01) {
+        holdingsSheet.getRange(existingRow, 4).setNumberFormat('0.00000000');
+      }
+      
+      _logInfo(`Refreshed ${ticker}: ${shares} shares @ $${price.toFixed(6)} = $${currentValue.toFixed(2)}`);
+    } else {
+      _logWarning(`Could not fetch price for ${ticker}`);
+    }
+    
+  } catch (error) {
+    _logError('Failed to refresh single holding', error, { ticker });
+  }
+}
+
+function _calculatePortfolioSummary() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    
+    if (!holdingsSheet || holdingsSheet.getLastRow() < 2) {
+      return { totalValue: 0, totalCost: 0, totalGainLoss: 0, holdings: 0 };
+    }
+    
+    const lastRow = holdingsSheet.getLastRow();
+    const data = holdingsSheet.getRange(2, 1, lastRow - 1, 7).getValues();
+    
+    let totalValue = 0;
+    let totalCost = 0;
+    let holdingsCount = 0;
+    
+    for (const row of data) {
+      if (!row || row.length === 0) continue;
+      
+      const shares = parseFloat(row[1] || 0);        // Column B: Shares
+      const costBasis = parseFloat(row[2] || 0);     // Column C: Cost Basis
+      const currentValue = parseFloat(row[4] || 0);  // Column E: Current Value
+      
+      if (shares > 0) {
+        holdingsCount++;
+        totalValue += currentValue;
+        totalCost += (costBasis * shares);
+      }
+    }
+    
+    return {
+      totalValue: totalValue,
+      totalCost: totalCost,
+      totalGainLoss: totalValue - totalCost,
+      holdings: holdingsCount
+    };
+    
+  } catch (error) {
+    _logError('Failed to calculate portfolio summary', error);
+    return { totalValue: 0, totalCost: 0, totalGainLoss: 0, holdings: 0 };
+  }
 }
 
 // ===================== EMAIL PROCESSING ENGINE =====================
@@ -1932,6 +2248,7 @@ function onOpen() {
     .addItem('🧹 Cleanup Stale Transactions', 'cleanupStaleTransactions')
     .addSeparator()
     .addItem('📊 Refresh Holdings Prices', 'refreshHoldingsData')
+    .addItem('🏦 Initialize Current Holdings', 'initializeHoldingsData')
     .addItem('📈 Update Dashboard', 'updateDashboard')
     .addSeparator()
     .addItem('🔧 Run Full Automation', 'runFullAutomation')
@@ -2012,24 +2329,110 @@ function quickSetup() {
   try {
     _logInfo('Starting quick setup...');
     
-    const ss = _ss();
-    _setupInitialSheets(ss);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // Manual setup instead of calling _setupInitialSheets to avoid function loading issues
+    setupSheetsManually(ss);
+    
+    // Initialize with current holdings data
+    initializeHoldingsData();
     
     SpreadsheetApp.getUi().alert(
       'Quick Setup Complete',
       'Finance Automation V10 has been set up successfully!\n\n' +
       'All required sheets have been created with proper headers.\n' +
+      'Your current Wealthsimple holdings have been loaded.\n' +
       'You can now start processing emails.',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
     
   } catch (error) {
     _logError('Quick setup failed', error);
+    const errorMessage = error.message || 'Unknown error occurred';
     SpreadsheetApp.getUi().alert(
       'Setup Error',
-      `Quick setup failed: ${error.message}`,
+      `Quick setup failed: ${errorMessage}\n\nPlease save the script and try again.`,
       SpreadsheetApp.getUi().ButtonSet.OK
     );
+  }
+}
+
+function setupSheetsManually(ss) {
+  try {
+    _logInfo('Setting up sheets manually...');
+    
+    // Main Transactions sheet
+    let mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    if (!mainSheet) {
+      mainSheet = ss.insertSheet(SHEET_NAMES.MAIN);
+      const headers = ['Date', 'Amount', 'From Account', 'To Account', 'Bank', 'Notes', 'Email ID', 'Category', 'Type', 'Fingerprint'];
+      mainSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      mainSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
+    }
+    
+    // Staging sheet
+    let stagingSheet = ss.getSheetByName(SHEET_NAMES.STAGING);
+    if (!stagingSheet) {
+      stagingSheet = ss.insertSheet(SHEET_NAMES.STAGING);
+      const headers = ['Date', 'Amount', 'From Account', 'To Account', 'Bank', 'Email ID', 'Staged At', 'Direction', 'Status', 'Fingerprint'];
+      stagingSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      stagingSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
+    }
+    
+    // Accounts sheet
+    let accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+    if (!accountsSheet) {
+      accountsSheet = ss.insertSheet(SHEET_NAMES.ACCOUNTS);
+      const headers = ['Account Name', 'Balance', 'Account Type', 'Bank', 'Last Updated'];
+      accountsSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      accountsSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
+    }
+    
+    // Holdings sheet - DO NOT OVERWRITE if it has data
+    let holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    if (!holdingsSheet) {
+      holdingsSheet = ss.insertSheet(SHEET_NAMES.HOLDINGS);
+      const headers = ['Ticker', 'Shares', 'Cost Basis', 'Current Price', 'Current Value', 'Account', 'Last Updated'];
+      holdingsSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      holdingsSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
+    } else {
+      // Holdings sheet exists - only add headers if completely empty
+      if (holdingsSheet.getLastRow() === 0) {
+        const headers = ['Ticker', 'Shares', 'Cost Basis', 'Current Price', 'Current Value', 'Account', 'Last Updated'];
+        holdingsSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        holdingsSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
+      }
+    }
+    
+    // Categories sheet
+    let categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    if (!categoriesSheet) {
+      categoriesSheet = ss.insertSheet(SHEET_NAMES.CATEGORIES);
+      const headers = ['Merchant Pattern', 'Category'];
+      categoriesSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      categoriesSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
+    }
+    
+    // Dashboard sheet
+    let dashboardSheet = ss.getSheetByName(SHEET_NAMES.DASHBOARD);
+    if (!dashboardSheet) {
+      dashboardSheet = ss.insertSheet(SHEET_NAMES.DASHBOARD);
+    }
+    
+    // Audit Log sheet
+    let auditSheet = ss.getSheetByName(SHEET_NAMES.AUDIT_LOG);
+    if (!auditSheet) {
+      auditSheet = ss.insertSheet(SHEET_NAMES.AUDIT_LOG);
+      const headers = ['Timestamp', 'Level', 'Message', 'Details', 'Function'];
+      auditSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      auditSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
+    }
+    
+    _logInfo('Manual sheet setup completed successfully');
+    
+  } catch (error) {
+    _logError('Failed to setup sheets manually', error);
+    throw error;
   }
 }
 
@@ -2485,10 +2888,71 @@ function testShibPriceFetch() {
   }
 }
 
-// ===================== INITIALIZATION =====================
+// ===================== INITIALIZATION & CURRENT HOLDINGS DATA =====================
+
+// Current holdings data (as of August 20, 2025)
+const CURRENT_HOLDINGS = {
+  'BTC': { shares: 0.000176, ticker: 'BTC-USD', name: 'Bitcoin', account: 'Wealthsimple' },
+  'DOT': { shares: 1.965129, ticker: 'DOT-USD', name: 'Polkadot', account: 'Wealthsimple' },
+  'ETH': { shares: 0.006272, ticker: 'ETH-USD', name: 'Ethereum', account: 'Wealthsimple' },
+  'SHIB': { shares: 693136.684119, ticker: 'SHIB-USD', name: 'Shiba Inu', account: 'Wealthsimple' },
+  'SOL': { shares: 0.009404, ticker: 'SOL-USD', name: 'Solana', account: 'Wealthsimple' },
+  'VCE': { shares: 20.0121, ticker: 'VCE.TO', name: 'Vanguard FTSE Canada Index ETF', account: 'Wealthsimple' },
+  'XEQT': { shares: 13.541, ticker: 'XEQT.TO', name: 'iShares Core Equity ETF Portfolio', account: 'Wealthsimple' }
+};
 
 // Auto-run setup when script is first installed
 function onInstall(e) {
   onOpen(e);
   quickSetup();
+}
+
+function initializeHoldingsData() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    
+    if (!holdingsSheet) {
+      throw new Error('Holdings sheet not found. Please run Quick Setup first.');
+    }
+    
+    // Check if holdings are already initialized
+    if (holdingsSheet.getLastRow() > 1) {
+      _logInfo('Holdings sheet already contains data - preserving existing data');
+      return;
+    }
+    
+    // Add current holdings data
+    _logInfo('Initializing holdings with current portfolio data...');
+    
+    for (const [symbol, data] of Object.entries(CURRENT_HOLDINGS)) {
+      const row = [
+        data.ticker,           // Column A: Ticker
+        data.shares,           // Column B: Shares
+        '',                    // Column C: Cost Basis (to be calculated)
+        '',                    // Column D: Current Price (to be fetched)
+        '',                    // Column E: Current Value (to be calculated)
+        data.account,          // Column F: Account
+        new Date()             // Column G: Last Updated
+      ];
+      
+      holdingsSheet.appendRow(row);
+      
+      // Apply special formatting for SHIB (high precision)
+      if (symbol === 'SHIB') {
+        const currentRow = holdingsSheet.getLastRow();
+        holdingsSheet.getRange(currentRow, 2).setNumberFormat('0.000000'); // Shares
+        holdingsSheet.getRange(currentRow, 4).setNumberFormat('0.00000000'); // Price
+      }
+    }
+    
+    _logInfo(`Initialized ${Object.keys(CURRENT_HOLDINGS).length} holdings in the portfolio`);
+    
+    // Immediately refresh prices
+    _refreshHoldingsData();
+    
+  } catch (error) {
+    _logError('Failed to initialize holdings data', error);
+    throw error;
+  }
 }
