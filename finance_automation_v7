@@ -149,7 +149,7 @@ function _ss() {
   } catch (error) {
     throw new Error(`Cannot access spreadsheet: ${error.message}`);
   }
-}
+// ...existing code...
 
 function _normalize(str) {
   return (str || '').toString().trim();
@@ -2084,6 +2084,7 @@ try {
 // ...existing code...
 
 // ===================== END OF FINANCE AUTOMATION V6 =====================
+}
   try {
     _logInfo('=== Starting complete finance automation process ===');
     
