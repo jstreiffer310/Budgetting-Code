@@ -67,8 +67,8 @@ const COLUMNS = {
     ACCOUNT: 1,
     TICKER: 2,
     SHARES: 3,
-    PRICE: 4,
-    VALUE: 5,
+    UNIT_PRICE_CAD: 4,     // Price per share/unit in CAD
+    TOTAL_VALUE_CAD: 5,    // Total value (price × shares) in CAD
     LAST_UPDATED: 6
   },
   STAGING: {
@@ -267,7 +267,7 @@ function _ensureSheetsAndHeaders() {
     ]);
     
     ensureSheet(SHEET_NAMES.HOLDINGS, [
-      'Account', 'Ticker', 'Shares', 'Price', 'Value', 'Last Updated'
+      'Account', 'Ticker', 'Shares', 'Unit Price (CAD)', 'Total Value (CAD)', 'Last Updated'
     ]);
     
     ensureSheet(SHEET_NAMES.STAGING, [
@@ -1134,8 +1134,8 @@ function _updateHoldingsQuantity(accountName, ticker, sharesDelta) {
         accountName,
         ticker,
         sharesDelta,
-        0, // Price will be updated by price fetching
-        0, // Value will be calculated
+        0, // Unit price will be updated by price fetching
+        0, // Total value will be calculated
         new Date()
       ]);
       _logInfo(`Added new holding: ${sharesDelta} shares of ${ticker} in ${accountName}`);
@@ -1148,226 +1148,226 @@ function _updateHoldingsQuantity(accountName, ticker, sharesDelta) {
 
 function updateHoldingsAndBalances() {
   try {
+    _logInfo('Starting holdings and balances update with CAD conversion...');
     const ss = _ss();
     const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
     const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
-    
     if (!holdingsSheet || holdingsSheet.getLastRow() < 2) {
       _logInfo('Holdings sheet is empty, skipping update');
       return;
     }
-    
     const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, Object.keys(COLUMNS.HOLDINGS).length).getValues();
     const accountTotals = {};
     let updatedCount = 0;
-    
-    // Process each holding
+    let errorCount = 0;
     for (let i = 0; i < data.length; i++) {
-      const row = i + 2; // Actual sheet row
+      const row = i + 2;
       const account = _normalize(data[i][COLUMNS.HOLDINGS.ACCOUNT - 1]);
       const ticker = _normalize(data[i][COLUMNS.HOLDINGS.TICKER - 1]);
       const shares = parseFloat(data[i][COLUMNS.HOLDINGS.SHARES - 1] || 0);
-      
       if (!account || !ticker || shares === 0) continue;
-      
       try {
-        // Update price using GOOGLEFINANCE or external API
-        const priceCell = holdingsSheet.getRange(row, COLUMNS.HOLDINGS.PRICE);
-        let price = 0;
-        
-        // Try GOOGLEFINANCE first for supported tickers
-        if (_isSupportedTicker(ticker)) {
-          const formula = `=IFERROR(GOOGLEFINANCE("${ticker}","price"),"ERROR")`;
-          priceCell.setFormula(formula);
-          
-          // Wait a bit for the formula to calculate
-          Utilities.sleep(100);
-          
-          const priceValue = priceCell.getValue();
-          if (typeof priceValue === 'number' && priceValue > 0) {
-            price = priceValue;
-          } else {
-            // Fallback to manual price fetching
-            price = _fetchPriceFromAPI(ticker);
-            if (price > 0) {
-              priceCell.setValue(price);
-            }
-          }
-        } else {
-          // Use manual price fetching for unsupported tickers
-          price = _fetchPriceFromAPI(ticker);
-          if (price > 0) {
-            priceCell.setValue(price);
-          }
-        }
-        
-        // Calculate and update value
-        const value = (price && shares) ? price * shares : 0;
-        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.VALUE).setValue(value);
-        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
-        
-        // Format value as currency
-        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.VALUE).setNumberFormat('$#,##0.00');
-        
-        if (value > 0) {
-          accountTotals[account] = (accountTotals[account] || 0) + value;
+        const priceResult = _fetchPriceWithFallbacks(ticker);
+        if (priceResult && priceResult.price > 0) {
+          const unitPriceCAD = priceResult.price;
+          const totalValueCAD = unitPriceCAD * shares;
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue(unitPriceCAD);
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setValue(totalValueCAD);
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setNumberFormat('$#,##0.00####');
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setNumberFormat('$#,##0.00');
+          accountTotals[account] = (accountTotals[account] || 0) + totalValueCAD;
           updatedCount++;
+          _logInfo(`Updated ${ticker}: ${shares} × $${unitPriceCAD.toFixed(4)} CAD = $${totalValueCAD.toFixed(2)} CAD`, {
+            source: priceResult.source,
+            originalPrice: priceResult.originalPrice,
+            originalCurrency: priceResult.originalCurrency
+          });
+        } else {
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue('ERROR');
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
+          errorCount++;
+          _logWarning(`Failed to fetch price for ${ticker}`);
         }
-        
-        _logInfo(`Updated holding: ${ticker} in ${account}`, {
-          shares: shares,
-          price: price,
-          value: value
-        });
-        
       } catch (error) {
-        _logError(`Failed to update holding: ${ticker}`, error);
+        _logError(`Error processing ${ticker}`, error);
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue('ERROR');
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
+        errorCount++;
       }
+      Utilities.sleep(300);
     }
-    
-    // Update account balances for investment accounts
     for (const [accountName, totalValue] of Object.entries(accountTotals)) {
       const accountRow = _findAccountRow(accountsSheet, accountName);
       if (accountRow > 0) {
         accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.BALANCE).setValue(totalValue);
         accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.BALANCE).setNumberFormat('$#,##0.00');
         accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.LAST_UPDATED).setValue(new Date());
-        
-        _logInfo(`Updated ${accountName} investment balance: ${totalValue.toFixed(2)}`);
+        _logInfo(`Updated ${accountName} balance: $${totalValue.toFixed(2)} CAD`);
       }
     }
-    
-    _logInfo(`Holdings update completed: ${updatedCount} holdings processed`);
-    
+    const message = `Holdings update completed!\n\n` +
+                   `Successfully updated: ${updatedCount}\n` +
+                   `Errors: ${errorCount}\n` +
+                   `Total portfolio value: $${Object.values(accountTotals).reduce((a, b) => a + b, 0).toFixed(2)} CAD`;
+    SpreadsheetApp.getUi().alert(message);
+    _logInfo(`Holdings update completed`, {
+      updated: updatedCount,
+      errors: errorCount,
+      totalValueCAD: Object.values(accountTotals).reduce((a, b) => a + b, 0)
+    });
   } catch (error) {
     _logError('Failed to update holdings and balances', error);
+    SpreadsheetApp.getUi().alert('❌ Holdings update failed. Check execution logs for details.');
   }
 }
 
-function _isSupportedTicker(ticker) {
-  // Check if ticker is supported by GOOGLEFINANCE
-  return /^[A-Z]{1,5}(\.[A-Z]{2})?$/.test(ticker) || // Standard stock symbols
-         /^[A-Z]{3,4}[.-][A-Z]{3}$/.test(ticker); // Crypto pairs like BTC-CAD
-}
-
-function _fetchPriceFromAPI(ticker) {
+// ===================== MANUAL FUNCTIONS FOR IMMEDIATE FIXES =====================
+function manualPriceRefreshCAD() {
   try {
-    // Try Yahoo Finance for stocks and ETFs
-    if (!ticker.includes('-')) {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`;
-      const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-      
-      if (response.getResponseCode() === 200) {
-        const data = JSON.parse(response.getContentText());
-        if (data.chart && data.chart.result && data.chart.result[0] && 
-            data.chart.result[0].meta && data.chart.result[0].meta.regularMarketPrice) {
-          return parseFloat(data.chart.result[0].meta.regularMarketPrice);
-        }
-      }
-    }
-    
-    // Try CoinGecko for crypto
-    if (ticker.includes('-CAD') || ticker.includes('-USD')) {
-      const baseCurrency = ticker.split('-')[0].toLowerCase();
-      const quoteCurrency = ticker.split('-')[1].toLowerCase();
-      
-      const url = `https://api.coingecko.com/api/v3/simple/price?ids=${baseCurrency}&vs_currencies=${quoteCurrency}`;
-      const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-      
-      if (response.getResponseCode() === 200) {
-        const data = JSON.parse(response.getContentText());
-        if (data[baseCurrency] && data[baseCurrency][quoteCurrency]) {
-          return parseFloat(data[baseCurrency][quoteCurrency]);
-        }
-      }
-    }
-    
-    return 0;
-    
-  } catch (error) {
-    _logError(`Failed to fetch price for ${ticker}`, error);
-    return 0;
-  }
-}
-
-// ===================== CATEGORY MANAGEMENT =====================
-
-function learnCategories() {
-  try {
+    _logInfo('Starting manual price refresh (CAD)...');
     const ss = _ss();
-    const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
-    const catSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
-    
-    if (!txSheet || txSheet.getLastRow() < 2 || !catSheet || catSheet.getLastRow() < 2) {
-      _logInfo('Insufficient data for category learning');
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    if (!holdingsSheet || holdingsSheet.getLastRow() < 2) {
+      SpreadsheetApp.getUi().alert('No holdings found to refresh.');
       return;
     }
-    
-    // Get category rules
-    const rules = catSheet.getRange(2, 1, catSheet.getLastRow() - 1, 2).getValues()
-      .map(row => ({
-        keyword: _lc(row[0] || ''),
-        category: row[1] || ''
-      }))
-      .filter(rule => rule.keyword && rule.category);
-    
-    if (rules.length === 0) {
-      _logInfo('No category rules found');
-      return;
-    }
-    
-    // Process transactions
-    const txData = txSheet.getRange(2, 1, txSheet.getLastRow() - 1, Object.keys(COLUMNS.TRANSACTIONS).length).getValues();
-    let categorizedCount = 0;
-    
-    for (let i = 0; i < txData.length; i++) {
-      const rowIndex = i + 2;
-      const existingCategory = _normalize(txData[i][COLUMNS.TRANSACTIONS.CATEGORY - 1]);
-      
-      // Skip if already categorized (respect manual categories)
-      if (existingCategory) continue;
-      
-      // Create search text from transaction fields
-      const searchText = _lc([
-        txData[i][COLUMNS.TRANSACTIONS.FROM - 1], // From
-        txData[i][COLUMNS.TRANSACTIONS.TO - 1],   // To  
-        txData[i][COLUMNS.TRANSACTIONS.BANK - 1], // Bank
-        txData[i][COLUMNS.TRANSACTIONS.NOTES - 1] // Notes
-      ].join(' '));
-      
-      // Apply first matching rule
-      for (const rule of rules) {
-        const keywords = rule.keyword.split(/[|;,]/).map(k => k.trim()).filter(Boolean);
-        const matches = keywords.some(keyword => 
-          keyword && searchText.includes(keyword)
-        );
-        
-        if (matches) {
-          // Use proper cell formatting to prevent spillover
-          const categoryCell = txSheet.getRange(rowIndex, COLUMNS.TRANSACTIONS.CATEGORY);
-          categoryCell.setValue(rule.category);
-          categoryCell.setWrap(false);
-          categoryCell.setHorizontalAlignment('left');
-          
-          categorizedCount++;
-          break;
+    const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, Object.keys(COLUMNS.HOLDINGS).length).getValues();
+    let refreshedCount = 0;
+    let errorCount = 0;
+    for (let i = 0; i < data.length; i++) {
+      const row = i + 2;
+      const ticker = _normalize(data[i][COLUMNS.HOLDINGS.TICKER - 1]);
+      const shares = parseFloat(data[i][COLUMNS.HOLDINGS.SHARES - 1] || 0);
+      if (!ticker || shares === 0) continue;
+      try {
+        const priceResult = _fetchPriceWithFallbacks(ticker);
+        if (priceResult && priceResult.price > 0) {
+          const unitPriceCAD = priceResult.price;
+          const totalValueCAD = unitPriceCAD * shares;
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue(unitPriceCAD);
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setValue(totalValueCAD);
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setNumberFormat('$#,##0.00####');
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setNumberFormat('$#,##0.00');
+          refreshedCount++;
+        } else {
+          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue('ERROR');
+          errorCount++;
         }
+      } catch (error) {
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue('ERROR');
+        errorCount++;
       }
+      Utilities.sleep(300);
     }
-    
-    _logInfo(`Category learning completed: ${categorizedCount} transactions categorized`);
-    
+    const message = `Manual price refresh completed!\n\n` +
+                   `✅ Successfully refreshed: ${refreshedCount}\n` +
+                   `❌ Errors: ${errorCount}\n\n` +
+                   `All prices are displayed in CAD.`;
+    SpreadsheetApp.getUi().alert(message);
+    _logInfo('Manual price refresh completed', { refreshed: refreshedCount, errors: errorCount });
   } catch (error) {
-    _logError('Failed to learn categories', error);
+    _logError('Manual price refresh failed', error);
+    SpreadsheetApp.getUi().alert('❌ Manual price refresh failed. Check logs.');
   }
 }
 
-function suggestCategoriesFromTransactions() {
+function testPriceFetchingCAD() {
+  const testTickers = ['BTC-USD', 'ETH-USD', 'SHIB-USD', 'VCE-TSE', 'DOT-USD', 'SOL-USD'];
+  const results = [];
+  results.push('=== PRICE FETCHING TEST (CAD Conversion) ===\n');
+  testTickers.forEach(ticker => {
+    try {
+      const priceResult = _fetchPriceWithFallbacks(ticker);
+      if (priceResult && priceResult.price > 0) {
+        const result = `✅ ${ticker}: $${priceResult.price.toFixed(6)} CAD\n` +
+                      `   Source: ${priceResult.source}\n` +
+                      `   Original: $${priceResult.originalPrice} ${priceResult.originalCurrency}`;
+        results.push(result);
+      } else {
+        results.push(`❌ ${ticker}: FAILED - No price data available`);
+      }
+    } catch (error) {
+      results.push(`❌ ${ticker}: ERROR - ${error.message}`);
+    }
+    Utilities.sleep(500);
+  });
+  const message = results.join('\n');
+  SpreadsheetApp.getUi().alert(message);
+}
+
+// ===================== MENU SYSTEM & MAIN FUNCTIONS =====================
+function onOpen() {
   try {
     const ss = _ss();
-    const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
-    let catSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    _ensureSheetsAndHeaders();
+    const menu = SpreadsheetApp.getUi()
+      .createMenu('💰 Finance Automation V6 (CAD Enhanced)')
+      .addItem('🔧 Setup Permissions', 'setupPermissions')
+      .addSeparator()
+      .addItem('🔄 Process All', 'processEverything')
+      .addSeparator()
+      .addItem('📊 Update Holdings & Balances (CAD)', 'updateHoldingsAndBalances')
+      .addItem('🔄 Manual Price Refresh (CAD)', 'manualPriceRefreshCAD')
+      .addItem('🧪 Test Price Fetching (CAD)', 'testPriceFetchingCAD')
+      .addSeparator()
+      .addItem('📧 Process New Emails', 'processNewEmails')
+      .addItem('🔗 Pair Staged Transfers', 'pairStagedTransfers')
+      .addSeparator()
+      .addItem('📈 Rebuild Dashboard', 'buildDashboard')
+      .addItem('🏷️ Learn Categories', 'learnCategories')
+      .addItem('💡 Suggest Categories', 'suggestCategoriesFromTransactions')
+      .addSeparator()
+      .addItem('📁 Import from CSV', 'importFromCsv')
+      .addItem('🎨 Apply Formatting', 'applyConditionalFormatting')
+      .addItem('🧹 Clean Stale Transactions', 'cleanupStaleTransactions')
+      .addSeparator()
+      .addItem('🛠️ System Diagnostics', 'runSystemDiagnostics')
+      .addItem('📋 Show Configuration', 'showConfiguration');
+    menu.addToUi();
+    _logInfo('Finance Automation V6 (CAD Enhanced) menu loaded successfully');
+  } catch (error) {
+    try {
+      SpreadsheetApp.getUi().alert(
+        'Finance Automation V6 Setup Error\n\n' +
+        'There was an issue setting up the system. Error: ' + error.message + '\n\n' +
+        'Please run the "Setup Permissions" function first.'
+      );
+    } catch (alertError) { }
+  }
+}
+
+function onEdit(e) {
+  try {
+    const range = e.range;
+    const sheet = range.getSheet();
     
+    // Handle manual account balance changes
+    if (sheet.getName() === SHEET_NAMES.ACCOUNTS && 
+        range.getColumn() === COLUMNS.ACCOUNTS.BALANCE && 
+        range.getRow() > 1) {
+      
+      const ss = _ss();
+      const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+      
+      const accountName = sheet.getRange(range.getRow(), COLUMNS.ACCOUNTS.NAME).getValue();
+      const oldValue = parseFloat(e.oldValue || 0);
+      const newValue = parseFloat(e.value || 0);
+      const difference = newValue - oldValue;
+      
+      // Only log significant changes (> 1 cent)
+      if (Math.abs(difference) > 0.01) {
+        // Create adjustment transaction
+        const adjustmentTx = {
+          date: new Date(),
+          amount: difference,
+          fromAccount: difference < 0 ? accountName : 'Manual Adjustment',
+          toAccount: difference > 0 ? accountName : 'Manual Adjustment',
+          bank: 'Manual Correction',
+          emailId: `MANUAL-${Date.now()}`,
+          type: 'Manual Adjustment',
+          notes: `Balance manually adjusted: ${oldValue.toFixed(2)} → ${newValue.toFixed(2)}`
     if (!catSheet) {
       catSheet = ss.insertSheet(SHEET_NAMES.CATEGORIES);
       catSheet.appendRow(['Keyword', 'Category']);
