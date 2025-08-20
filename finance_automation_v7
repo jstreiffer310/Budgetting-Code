@@ -1148,77 +1148,102 @@ function _updateHoldingsQuantity(accountName, ticker, sharesDelta) {
 
 function updateHoldingsAndBalances() {
   try {
-    _logInfo('Starting holdings and balances update with CAD conversion...');
+    console.log('Starting holdings and balances update...');
     const ss = _ss();
+    _ensureSheetsAndHeaders();
     const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
     const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
     if (!holdingsSheet || holdingsSheet.getLastRow() < 2) {
-      _logInfo('Holdings sheet is empty, skipping update');
+      console.log('Holdings sheet is empty, skipping update');
       return;
     }
-    const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, Object.keys(COLUMNS.HOLDINGS).length).getValues();
+    const numCols = Object.keys(COLUMNS.HOLDINGS).length;
+    const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, numCols).getValues();
     const accountTotals = {};
     let updatedCount = 0;
     let errorCount = 0;
+    const delay = (ms) => Utilities.sleep(ms);
     for (let i = 0; i < data.length; i++) {
       const row = i + 2;
       const account = _normalize(data[i][COLUMNS.HOLDINGS.ACCOUNT - 1]);
       const ticker = _normalize(data[i][COLUMNS.HOLDINGS.TICKER - 1]);
       const shares = parseFloat(data[i][COLUMNS.HOLDINGS.SHARES - 1] || 0);
-      if (!account || !ticker || shares === 0) continue;
+      if (!account || !ticker || shares === 0) { console.log('Skipping invalid holding:', ticker); continue; }
+      let price = 0;
+      let priceMethod = 'None';
       try {
-        const priceResult = _fetchPriceWithFallbacks(ticker);
-        if (priceResult && priceResult.price > 0) {
-          const unitPriceCAD = priceResult.price;
-          const totalValueCAD = unitPriceCAD * shares;
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue(unitPriceCAD);
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setValue(totalValueCAD);
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setNumberFormat('$#,##0.00####');
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setNumberFormat('$#,##0.00');
-          accountTotals[account] = (accountTotals[account] || 0) + totalValueCAD;
-          updatedCount++;
-          _logInfo(`Updated ${ticker}: ${shares} × $${unitPriceCAD.toFixed(4)} CAD = $${totalValueCAD.toFixed(2)} CAD`, {
-            source: priceResult.source,
-            originalPrice: priceResult.originalPrice,
-            originalCurrency: priceResult.originalCurrency
-          });
+        if (_isSupportedTicker(ticker)) {
+          console.log('Trying GOOGLEFINANCE for', ticker);
+          const priceCell = holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD);
+          let formula = '';
+          if (ticker.includes('-TSE')) {
+            const symbol = ticker.replace('-TSE', '');
+            formula = '=IFERROR(GOOGLEFINANCE("TSE:' + symbol + '","price"),0)';
+          } else if (ticker.includes('-USD') || ticker.includes('-CAD')) {
+            formula = '=IFERROR(GOOGLEFINANCE("' + ticker + '","price"),0)';
+          } else {
+            formula = '=IFERROR(GOOGLEFINANCE("' + ticker + '","price"),0)';
+          }
+          priceCell.setFormula(formula);
+          delay(500);
+          const priceValue = priceCell.getValue();
+          if (typeof priceValue === 'number' && priceValue > 0) {
+            price = priceValue; priceMethod = 'GOOGLEFINANCE';
+          } else {
+            console.log('GOOGLEFINANCE failed for', ticker, 'trying API...');
+            price = _fetchPriceFromAPI(ticker);
+            if (price > 0) { priceCell.setValue(price); priceMethod = 'API'; }
+          }
         } else {
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue('ERROR');
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
-          errorCount++;
-          _logWarning(`Failed to fetch price for ${ticker}`);
+          console.log('Using API for', ticker);
+          price = _fetchPriceFromAPI(ticker);
+          if (price > 0) {
+            holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue(price);
+            priceMethod = 'API';
+          }
         }
+        const value = (price && shares) ? price * shares : 0;
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setValue(value);
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setNumberFormat('$#,##0.00####');
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setNumberFormat('$#,##0.00');
+        if (value > 0) {
+          accountTotals[account] = (accountTotals[account] || 0) + value;
+          updatedCount++;
+          console.log('Updated', ticker, shares, '×', price, '=', value, '(', priceMethod, ')');
+        } else {
+          errorCount++; console.log('Failed to get price for', ticker);
+        }
+        delay(200);
       } catch (error) {
-        _logError(`Error processing ${ticker}`, error);
+        console.error('Error processing', ticker, error);
+        errorCount++;
         holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue('ERROR');
         holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
-        errorCount++;
       }
-      Utilities.sleep(300);
     }
     for (const [accountName, totalValue] of Object.entries(accountTotals)) {
-      const accountRow = _findAccountRow(accountsSheet, accountName);
-      if (accountRow > 0) {
-        accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.BALANCE).setValue(totalValue);
-        accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.BALANCE).setNumberFormat('$#,##0.00');
-        accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.LAST_UPDATED).setValue(new Date());
-        _logInfo(`Updated ${accountName} balance: $${totalValue.toFixed(2)} CAD`);
+      try {
+        const accountRow = _findAccountRow(accountsSheet, accountName);
+        if (accountRow > 0) {
+          accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.BALANCE).setValue(totalValue);
+          accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.BALANCE).setNumberFormat('$#,##0.00');
+          accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.LAST_UPDATED).setValue(new Date());
+          console.log('Updated', accountName, 'balance:', totalValue);
+        }
+      } catch (error) {
+        console.error('Failed to update account balance for', accountName, error);
       }
     }
-    const message = `Holdings update completed!\n\n` +
-                   `Successfully updated: ${updatedCount}\n` +
-                   `Errors: ${errorCount}\n` +
-                   `Total portfolio value: $${Object.values(accountTotals).reduce((a, b) => a + b, 0).toFixed(2)} CAD`;
-    SpreadsheetApp.getUi().alert(message);
-    _logInfo(`Holdings update completed`, {
-      updated: updatedCount,
-      errors: errorCount,
-      totalValueCAD: Object.values(accountTotals).reduce((a, b) => a + b, 0)
-    });
+    const totalAccountValue = Object.values(accountTotals).reduce((a, b) => a + b, 0);
+    const message = 'Holdings update completed!\n\n' + 'Successfully updated: ' + updatedCount + '\n' + 'Errors: ' + errorCount + '\n' + 'Total account value: $' + totalAccountValue.toFixed(2);
+    console.log(message);
+    try { SpreadsheetApp.getUi().alert(message); } catch (e) {}
+    _logInfo('Holdings update completed', { updated: updatedCount, errors: errorCount, totalValue: totalAccountValue });
   } catch (error) {
+    console.error('Holdings update failed:', error);
     _logError('Failed to update holdings and balances', error);
-    SpreadsheetApp.getUi().alert('❌ Holdings update failed. Check execution logs for details.');
+    try { SpreadsheetApp.getUi().alert('❌ Holdings update failed. Check execution logs for details.'); } catch (e) {}
   }
 }
 
