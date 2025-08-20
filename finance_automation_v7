@@ -2,6 +2,21 @@
 function _lc(s) {
   return (s || '').toString().trim().toLowerCase();
 }
+// Generic normalize: trim, collapse whitespace, strip diacritics
+function _normalize(s) {
+  if (s === null || s === undefined) return '';
+  try {
+    // Convert to string, normalize unicode, remove diacritics, collapse spaces
+    return String(s)
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\u00A0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  } catch (e) {
+    return String(s).trim();
+  }
+}
 // ...existing code...
 function learnCategories() {
   // ...existing code...
@@ -1698,6 +1713,21 @@ function processEverything() {
       `Error: ${error.message}\n\n` +
       'Please check the execution log for details.'
     );
+  }
+}
+
+// Lightweight dashboard builder stub to avoid runtime errors in automation runs
+function buildDashboard() {
+  try {
+    const ss = _ss();
+    const dashboard = ss.getSheetByName(SHEET_NAMES.DASHBOARD);
+    if (!dashboard) return;
+    // Minimal: clear and write a timestamp note
+    dashboard.clear();
+    dashboard.getRange(1,1).setValue('Dashboard last rebuilt: ' + new Date().toLocaleString());
+    _logInfo('Dashboard rebuilt (stub)');
+  } catch (error) {
+    _logError('Failed to build dashboard (stub)', error);
   }
 }
 
