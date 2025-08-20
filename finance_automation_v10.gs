@@ -1638,9 +1638,30 @@ function _buildGoogleFinanceFormula(ticker) {
 function _fetchCryptoPriceWithPrecision(ticker) {
   try {
     const tickerUpper = ticker.toUpperCase();
-    let cryptoId = CRYPTO_MAPPINGS[tickerUpper.replace('-USD', '')] || CRYPTO_MAPPINGS[tickerUpper];
     
-    if (!cryptoId) return 0;
+    // Map simple ticker to CoinGecko ID
+    const cryptoIdMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum', 
+      'SOL': 'solana',
+      'DOT': 'polkadot',
+      'SHIB': 'shiba-inu',
+      'ADA': 'cardano',
+      'MATIC': 'matic-network',
+      'AVAX': 'avalanche-2'
+    };
+    
+    let cryptoId = cryptoIdMap[tickerUpper];
+    
+    // Fallback to old mapping system
+    if (!cryptoId) {
+      cryptoId = CRYPTO_MAPPINGS[tickerUpper.replace('-USD', '')] || CRYPTO_MAPPINGS[tickerUpper];
+    }
+    
+    if (!cryptoId) {
+      _logError(`No crypto mapping found for ${ticker}`);
+      return 0;
+    }
     
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=cad&precision=18`;
     const response = UrlFetchApp.fetch(url, { 
@@ -1649,15 +1670,19 @@ function _fetchCryptoPriceWithPrecision(ticker) {
     });
     
     if (response.getResponseCode() !== 200) {
+      _logError(`CoinGecko API error for ${ticker}: ${response.getResponseCode()}`);
       return 0;
     }
     
     const data = JSON.parse(response.getContentText());
     
     if (data && data[cryptoId] && data[cryptoId].cad) {
-      return parseFloat(data[cryptoId].cad);
+      const price = parseFloat(data[cryptoId].cad);
+      _logInfo(`Fetched ${ticker} price: $${price.toFixed(8)} CAD from CoinGecko`);
+      return price;
     }
     
+    _logError(`No price data returned for ${ticker} (${cryptoId})`);
     return 0;
   } catch (error) {
     _logError(`Failed to fetch crypto price for ${ticker}`, error);
@@ -1710,15 +1735,20 @@ function _fetchPriceFromAPI(ticker) {
     
     const tickerUpper = ticker.toUpperCase();
     
-    // Check if it's a cryptocurrency
-    for (const cryptoTicker of Object.keys(CRYPTO_MAPPINGS)) {
-      if (tickerUpper.includes(cryptoTicker)) {
-        return _fetchCryptoPriceWithPrecision(ticker);
-      }
+    // Check if it's a cryptocurrency (simple ticker format)
+    const cryptoList = ['BTC', 'ETH', 'SOL', 'DOT', 'SHIB', 'ADA', 'MATIC', 'AVAX'];
+    if (cryptoList.includes(tickerUpper)) {
+      return _fetchCryptoPriceWithPrecision(tickerUpper);
     }
     
-    // For stocks and ETFs (including Canadian)
-    return _fetchYahooFinancePrice(ticker);
+    // For Canadian ETFs, add .TO suffix for Yahoo Finance
+    let yahooTicker = ticker;
+    if (['VCE', 'XEQT', 'VTI', 'VXUS', 'VFV'].includes(tickerUpper)) {
+      yahooTicker = tickerUpper + '.TO';
+    }
+    
+    // For stocks and ETFs
+    return _fetchYahooFinancePrice(yahooTicker);
     
   } catch (error) {
     _logError(`Failed to fetch price from API for ${ticker}`, error);
@@ -2255,6 +2285,7 @@ function onOpen() {
     .addItem('�📋 Show Configuration', 'showConfiguration')
     .addItem('🧪 Test Email Parsing', 'testEmailParsing')
     .addItem('💰 Test SHIB Price', 'testShibPriceFetch')
+    .addItem('🔍 Test All Prices', 'testAllCryptoPrices')
     .addToUi();
 }
 
@@ -2873,8 +2904,8 @@ function reviewPendingTransactions() {
 // Test SHIB price fetching (from additional_fixes.js)
 function testShibPriceFetch() {
   try {
-    const price = _fetchCryptoPriceWithPrecision('SHIB-USD');
-    const message = `SHIB-USD price: $${price.toFixed(8)}`;
+    const price = _fetchCryptoPriceWithPrecision('SHIB');
+    const message = `SHIB price: $${price.toFixed(8)} CAD`;
     _logInfo(message);
     try { SpreadsheetApp.getUi().alert(message); } catch (e) {}
   } catch (error) {
@@ -2883,17 +2914,47 @@ function testShibPriceFetch() {
   }
 }
 
+// Test all crypto prices
+function testAllCryptoPrices() {
+  try {
+    const cryptos = ['BTC', 'ETH', 'SOL', 'DOT', 'SHIB'];
+    let message = 'Crypto Prices (CAD):\n\n';
+    
+    for (const crypto of cryptos) {
+      const price = _fetchCryptoPriceWithPrecision(crypto);
+      message += `${crypto}: $${price.toFixed(8)}\n`;
+      _logInfo(`${crypto} price: $${price.toFixed(8)} CAD`);
+    }
+    
+    // Test ETFs too
+    const etfs = ['VCE', 'XEQT'];
+    message += '\nETF Prices (CAD):\n\n';
+    
+    for (const etf of etfs) {
+      const price = _fetchYahooFinancePrice(etf + '.TO');
+      message += `${etf}: $${price.toFixed(2)}\n`;
+      _logInfo(`${etf} price: $${price.toFixed(2)} CAD`);
+    }
+    
+    SpreadsheetApp.getUi().alert('Price Test Results', message, SpreadsheetApp.getUi().ButtonSet.OK);
+    
+  } catch (error) {
+    _logError('Failed to test crypto prices', error);
+    SpreadsheetApp.getUi().alert('Error', 'Price test failed. Check execution log.');
+  }
+}
+
 // ===================== INITIALIZATION & CURRENT HOLDINGS DATA =====================
 
-// Current holdings data (as of August 20, 2025)
+// Current holdings data (as of August 20, 2025) - Based on Wealthsimple screenshot
 const CURRENT_HOLDINGS = {
-  'BTC': { shares: 0.000176, ticker: 'BTC-USD', name: 'Bitcoin', account: 'Wealthsimple' },
-  'DOT': { shares: 1.965129, ticker: 'DOT-USD', name: 'Polkadot', account: 'Wealthsimple' },
-  'ETH': { shares: 0.006272, ticker: 'ETH-USD', name: 'Ethereum', account: 'Wealthsimple' },
-  'SHIB': { shares: 693136.684119, ticker: 'SHIB-USD', name: 'Shiba Inu', account: 'Wealthsimple' },
-  'SOL': { shares: 0.009404, ticker: 'SOL-USD', name: 'Solana', account: 'Wealthsimple' },
-  'VCE': { shares: 20.0121, ticker: 'VCE.TO', name: 'Vanguard FTSE Canada Index ETF', account: 'Wealthsimple' },
-  'XEQT': { shares: 13.541, ticker: 'XEQT.TO', name: 'iShares Core Equity ETF Portfolio', account: 'Wealthsimple' }
+  'BTC': { shares: 0.000176, ticker: 'BTC', name: 'Bitcoin', account: 'Wealthsimple Crypto' },
+  'DOT': { shares: 1.965129, ticker: 'DOT', name: 'Polkadot', account: 'Wealthsimple Crypto' },
+  'ETH': { shares: 0.006272, ticker: 'ETH', name: 'Ethereum', account: 'Wealthsimple Crypto' },
+  'SHIB': { shares: 693136.684119, ticker: 'SHIB', name: 'Shiba Inu', account: 'Wealthsimple Crypto' },
+  'SOL': { shares: 0.009404, ticker: 'SOL', name: 'Solana', account: 'Wealthsimple Crypto' },
+  'VCE': { shares: 20.0121, ticker: 'VCE', name: 'Vanguard FTSE Canada Index ETF', account: 'Wealthsimple RRSP' },
+  'XEQT': { shares: 13.541, ticker: 'XEQT', name: 'iShares Core Equity ETF Portfolio', account: 'Wealthsimple RRSP' }
 };
 
 // Auto-run setup when script is first installed
