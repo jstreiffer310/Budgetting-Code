@@ -1113,6 +1113,58 @@ function _cleanupStaleTransactions() {
 }
 
 // ===================== HOLDINGS MANAGEMENT =====================
+function _getUsdToCadRate() {
+  try {
+    const response = UrlFetchApp.fetch('https://api.exchangerate.host/latest?base=USD&symbols=CAD');
+    const data = JSON.parse(response.getContentText());
+    return data.rates.CAD || 1.35;
+  } catch (e) {
+    return 1.35;
+  }
+}
+
+function _fetchPriceGoogleFinance(ticker) {
+  try {
+    if (/^[A-Z]{3,4}-[A-Z]{3}$/.test(ticker)) return null;
+    let formula = '';
+    if (ticker.endsWith('-TSE')) formula = `=GOOGLEFINANCE("${ticker.replace('-TSE', 'TSE:')}", "price")`;
+    else formula = `=GOOGLEFINANCE("${ticker}", "price")`;
+    return formula;
+  } catch (e) { return null; }
+}
+
+function _fetchPriceYahooFinance(ticker) {
+  try {
+    let symbol = ticker;
+    if (ticker.endsWith('-TSE')) symbol = ticker.replace('-TSE', '.TO');
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}`;
+    const response = UrlFetchApp.fetch(url);
+    const data = JSON.parse(response.getContentText());
+    const price = data.quoteResponse.result[0]?.regularMarketPrice;
+    const currency = data.quoteResponse.result[0]?.currency || 'CAD';
+    return { price, currency };
+  } catch (e) { return null; }
+}
+
+function _fetchPriceCoinGecko(ticker) {
+  try {
+    const map = {
+      'BTC-USD': 'bitcoin',
+      'ETH-USD': 'ethereum',
+      'DOT-USD': 'polkadot',
+      'SOL-USD': 'solana',
+      'SHIB-USD': 'shiba-inu'
+    };
+    const id = map[ticker];
+    if (!id) return null;
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=cad,usd`;
+    const response = UrlFetchApp.fetch(url);
+    const data = JSON.parse(response.getContentText());
+    return data[id] && data[id].cad ? data[id].cad : null;
+  } catch (e) {
+    return null;
+  }
+}
 
 function _updateHoldingsQuantity(accountName, ticker, sharesDelta) {
   try {
@@ -1264,78 +1316,97 @@ function updateHoldingsAndBalances() {
 }
 
 // ===================== MANUAL FUNCTIONS FOR IMMEDIATE FIXES =====================
-function manualPriceRefreshCAD() {
+function updateHoldingsAndBalances() {
   try {
-    _logInfo('Starting manual price refresh (CAD)...');
     const ss = _ss();
-    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    const holdingsSheet = ss.getSheetByName(HOLDINGS_SHEET_NAME);
+    const accountsSheet = ss.getSheetByName(ACCOUNTS_SHEET_NAME);
+
+    // Update headers for clarity
+    holdingsSheet.getRange(1, 1, 1, 6).setValues([
+      ['Account', 'Ticker', 'Shares', 'Unit Price (CAD)', 'Total Value (CAD)', 'Last Updated']
+    ]);
+
     if (!holdingsSheet || holdingsSheet.getLastRow() < 2) {
-      SpreadsheetApp.getUi().alert('No holdings found to refresh.');
+      _logInfo('Holdings sheet is empty, skipping update');
       return;
     }
-    const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, Object.keys(COLUMNS.HOLDINGS).length).getValues();
-    let refreshedCount = 0;
-    let errorCount = 0;
+
+    const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, 3).getValues();
+    const usdToCad = _getUsdToCadRate();
+    const accountTotals = {};
+
     for (let i = 0; i < data.length; i++) {
       const row = i + 2;
-      const ticker = _normalize(data[i][COLUMNS.HOLDINGS.TICKER - 1]);
-      const shares = parseFloat(data[i][COLUMNS.HOLDINGS.SHARES - 1] || 0);
-      if (!ticker || shares === 0) continue;
-      try {
-        const priceResult = _fetchPriceWithFallbacks(ticker);
-        if (priceResult && priceResult.price > 0) {
-          const unitPriceCAD = priceResult.price;
-          const totalValueCAD = unitPriceCAD * shares;
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue(unitPriceCAD);
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setValue(totalValueCAD);
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setNumberFormat('$#,##0.00####');
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setNumberFormat('$#,##0.00');
-          refreshedCount++;
-        } else {
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue('ERROR');
-          errorCount++;
-        }
-      } catch (error) {
-        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue('ERROR');
-        errorCount++;
-      }
-      Utilities.sleep(300);
-    }
-    const message = `Manual price refresh completed!\n\n` +
-                   `✅ Successfully refreshed: ${refreshedCount}\n` +
-                   `❌ Errors: ${errorCount}\n\n` +
-                   `All prices are displayed in CAD.`;
-    SpreadsheetApp.getUi().alert(message);
-    _logInfo('Manual price refresh completed', { refreshed: refreshedCount, errors: errorCount });
-  } catch (error) {
-    _logError('Manual price refresh failed', error);
-    SpreadsheetApp.getUi().alert('❌ Manual price refresh failed. Check logs.');
-  }
-}
+      const account = _normalize(data[i][0]);
+      const ticker = _normalize(data[i][1]);
+      const shares = parseFloat(data[i][2] || 0);
+      let price = null;
+      let source = '';
 
-function testPriceFetchingCAD() {
-  const testTickers = ['BTC-USD', 'ETH-USD', 'SHIB-USD', 'VCE-TSE', 'DOT-USD', 'SOL-USD'];
-  const results = [];
-  results.push('=== PRICE FETCHING TEST (CAD Conversion) ===\n');
-  testTickers.forEach(ticker => {
-    try {
-      const priceResult = _fetchPriceWithFallbacks(ticker);
-      if (priceResult && priceResult.price > 0) {
-        const result = `✅ ${ticker}: $${priceResult.price.toFixed(6)} CAD\n` +
-                      `   Source: ${priceResult.source}\n` +
-                      `   Original: $${priceResult.originalPrice} ${priceResult.originalCurrency}`;
-        results.push(result);
-      } else {
-        results.push(`❌ ${ticker}: FAILED - No price data available`);
+      // 1. GOOGLEFINANCE
+      const gfFormula = _fetchPriceGoogleFinance(ticker);
+      if (gfFormula) {
+        holdingsSheet.getRange(row, 4).setFormula(gfFormula);
+        SpreadsheetApp.flush();
+        price = parseFloat(holdingsSheet.getRange(row, 4).getValue() || 0);
+        source = 'GOOGLEFINANCE';
       }
-    } catch (error) {
-      results.push(`❌ ${ticker}: ERROR - ${error.message}`);
+
+      // 2. Yahoo Finance
+      if (!price || price === 0 || isNaN(price)) {
+        const yf = _fetchPriceYahooFinance(ticker);
+        if (yf && yf.price) {
+          price = yf.price * (yf.currency === 'USD' ? usdToCad : 1);
+          holdingsSheet.getRange(row, 4).setValue(price);
+          source = 'Yahoo Finance';
+        }
+      }
+
+      // 3. CoinGecko (crypto)
+      if ((!price || price === 0 || isNaN(price)) && /^[A-Z]{3,4}-USD$/.test(ticker)) {
+        price = _fetchPriceCoinGecko(ticker);
+        if (price) {
+          holdingsSheet.getRange(row, 4).setValue(price);
+          source = 'CoinGecko';
+        }
+      }
+
+      // 4. Manual fallback
+      if (!price || price === 0 || isNaN(price)) {
+        holdingsSheet.getRange(row, 4).setValue('Manual');
+        price = 0;
+        source = 'Manual';
+      }
+
+      // Calculate value
+      const value = price * shares;
+      holdingsSheet.getRange(row, 5).setValue(value);
+      holdingsSheet.getRange(row, 5).setNumberFormat('$#,##0.00');
+      holdingsSheet.getRange(row, 6).setValue(new Date());
+
+      // Accumulate totals
+      if (value > 0) accountTotals[account] = (accountTotals[account] || 0) + value;
+
+      // Log source
+      _logInfo(`Updated ${ticker}: ${price} CAD via ${source}`);
     }
-    Utilities.sleep(500);
-  });
-  const message = results.join('\n');
-  SpreadsheetApp.getUi().alert(message);
+
+    // Update account balances
+    for (const [accountName, totalValue] of Object.entries(accountTotals)) {
+      const accountRow = _findAccountRow(accountsSheet, accountName);
+      if (accountRow > 0) {
+        accountsSheet.getRange(accountRow, 2).setValue(totalValue);
+        accountsSheet.getRange(accountRow, 2).setNumberFormat('$#,##0.00');
+        accountsSheet.getRange(accountRow, 3).setValue(new Date());
+      }
+    }
+
+    SpreadsheetApp.getUi().alert('✅ Holdings and balances updated in CAD!');
+  } catch (error) {
+    _logError('Failed to update holdings and balances', error);
+    SpreadsheetApp.getUi().alert('❌ Failed to update holdings and balances. See logs.');
+  }
 }
 
 // ===================== MENU SYSTEM & MAIN FUNCTIONS =====================
@@ -1352,6 +1423,10 @@ function onOpen() {
     // Create the menu
     const menu = SpreadsheetApp.getUi()
       .createMenu('💰 Finance Automation V6')
+      .addItem('� Setup Permissions', 'setupPermissions')
+      .addItem('🧪 Test Price Fetching (CAD)', 'testPriceFetchingCAD')
+      .addItem('�🔄 Manual Price Refresh (CAD)', 'updateHoldingsAndBalances')
+      .addSeparator()
       .addItem('🔄 Process All', 'processEverything')
       .addSeparator()
       .addItem('📧 Process New Emails', 'processNewEmails')
@@ -1368,12 +1443,50 @@ function onOpen() {
       .addSeparator()
       .addItem('🛠️ System Diagnostics', 'runSystemDiagnostics')
       .addItem('📋 Show Configuration', 'showConfiguration');
-    
     menu.addToUi();
     console.log('Finance Automation V6 menu created successfully');
-    
-    // Only log to audit after menu is created successfully
     _logInfo('Finance Automation V6 menu loaded successfully');
+function setupPermissions() {
+  try {
+    SpreadsheetApp.openById(SPREADSHEET_ID);
+    GmailApp.getInboxThreads(1);
+    DriveApp.getFiles();
+    Logger.log('Permissions setup completed');
+    SpreadsheetApp.getUi().alert('✅ Permissions setup completed successfully!');
+  } catch (error) {
+    Logger.log('Permissions setup failed: ' + error);
+    SpreadsheetApp.getUi().alert('❌ Permissions setup failed. Please check permissions.');
+  }
+}
+
+function testPriceFetchingCAD() {
+  const ss = _ss();
+  const holdingsSheet = ss.getSheetByName(HOLDINGS_SHEET_NAME);
+  const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, 2).getValues();
+  let results = '';
+  for (let i = 0; i < data.length; i++) {
+    const ticker = data[i][1];
+    let price = null;
+    let source = '';
+    const gfFormula = _fetchPriceGoogleFinance(ticker);
+    if (gfFormula) {
+      source = 'GOOGLEFINANCE';
+      price = 'Formula';
+    }
+    const yf = _fetchPriceYahooFinance(ticker);
+    if (yf && yf.price) {
+      source = 'Yahoo Finance';
+      price = yf.price;
+    }
+    const cg = _fetchPriceCoinGecko(ticker);
+    if (cg) {
+      source = 'CoinGecko';
+      price = cg;
+    }
+    results += `${ticker}: ${price} (${source})\n`;
+  }
+  SpreadsheetApp.getUi().alert(results);
+}
     
   } catch (error) {
     console.error('Failed to create menu:', error);
