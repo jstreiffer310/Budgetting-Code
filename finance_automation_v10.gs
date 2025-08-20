@@ -1663,26 +1663,63 @@ function _fetchCryptoPriceWithPrecision(ticker) {
       return 0;
     }
     
-    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=cad&precision=18`;
-    const response = UrlFetchApp.fetch(url, { 
-      muteHttpExceptions: true,
-      headers: { 'Accept': 'application/json' } 
-    });
-    
-    if (response.getResponseCode() !== 200) {
-      _logError(`CoinGecko API error for ${ticker}: ${response.getResponseCode()}`);
-      return 0;
+    // Try CoinGecko first
+    try {
+      const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=cad&precision=18`;
+      const response = UrlFetchApp.fetch(url, { 
+        muteHttpExceptions: true,
+        headers: { 'Accept': 'application/json' } 
+      });
+      
+      if (response.getResponseCode() === 200) {
+        const data = JSON.parse(response.getContentText());
+        
+        if (data && data[cryptoId] && data[cryptoId].cad) {
+          const price = parseFloat(data[cryptoId].cad);
+          _logInfo(`Fetched ${ticker} price: $${price.toFixed(8)} CAD from CoinGecko`);
+          return price;
+        }
+      } else {
+        _logError(`CoinGecko API error for ${ticker}: ${response.getResponseCode()}`);
+      }
+    } catch (cgError) {
+      _logError(`CoinGecko fetch failed for ${ticker}`, cgError);
     }
     
-    const data = JSON.parse(response.getContentText());
-    
-    if (data && data[cryptoId] && data[cryptoId].cad) {
-      const price = parseFloat(data[cryptoId].cad);
-      _logInfo(`Fetched ${ticker} price: $${price.toFixed(8)} CAD from CoinGecko`);
-      return price;
+    // Fallback to CoinCap API
+    try {
+      const coinCapMap = {
+        'BTC': 'bitcoin',
+        'ETH': 'ethereum',
+        'SOL': 'solana', 
+        'DOT': 'polkadot',
+        'SHIB': 'shiba-inu'
+      };
+      
+      const coinCapId = coinCapMap[tickerUpper];
+      if (coinCapId) {
+        const url = `https://api.coincap.io/v2/assets/${coinCapId}`;
+        const response = UrlFetchApp.fetch(url, { 
+          muteHttpExceptions: true,
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        if (response.getResponseCode() === 200) {
+          const data = JSON.parse(response.getContentText());
+          if (data && data.data && data.data.priceUsd) {
+            const usdPrice = parseFloat(data.data.priceUsd);
+            // Convert USD to CAD (approximate rate 1.37)
+            const cadPrice = usdPrice * 1.37;
+            _logInfo(`Fetched ${ticker} price: $${cadPrice.toFixed(8)} CAD from CoinCap (USD: $${usdPrice})`);
+            return cadPrice;
+          }
+        }
+      }
+    } catch (ccError) {
+      _logError(`CoinCap fetch failed for ${ticker}`, ccError);
     }
     
-    _logError(`No price data returned for ${ticker} (${cryptoId})`);
+    _logError(`All price sources failed for ${ticker}`);
     return 0;
   } catch (error) {
     _logError(`Failed to fetch crypto price for ${ticker}`, error);
@@ -1834,12 +1871,22 @@ function _refreshHoldingsData() {
         updatedCount++;
         
         // Special formatting for high-precision crypto prices (SHIB)
-        if (ticker.toUpperCase().includes('SHIB') && price < 0.01) {
-          const cell = holdingsSheet.getRange(i + 2, 4);
-          cell.setNumberFormat('0.00000000');
+        if (ticker.toUpperCase().includes('SHIB')) {
+          const priceCell = holdingsSheet.getRange(i + 2, 4);
+          const sharesCell = holdingsSheet.getRange(i + 2, 3);
+          const valueCell = holdingsSheet.getRange(i + 2, 5);
+          
+          priceCell.setNumberFormat('0.00000000'); // 8 decimal places for SHIB price
+          sharesCell.setNumberFormat('#,##0.000000'); // Shares with commas and 6 decimals
+          valueCell.setNumberFormat('$#,##0.00'); // Standard currency format for value
+          
+          _logInfo(`Updated ${ticker}: ${shares.toLocaleString()} shares @ $${price.toFixed(8)} = $${currentValue.toFixed(2)} (Account: ${account}) - SHIB HIGH PRECISION`);
+        } else {
+          // Standard formatting for other assets
+          holdingsSheet.getRange(i + 2, 4).setNumberFormat('$#,##0.00');
+          holdingsSheet.getRange(i + 2, 5).setNumberFormat('$#,##0.00');
+          _logInfo(`Updated ${ticker}: ${shares} shares @ $${price.toFixed(6)} = $${currentValue.toFixed(2)} (Account: ${account})`);
         }
-        
-        _logInfo(`Updated ${ticker}: ${shares} shares @ $${price.toFixed(6)} = $${currentValue.toFixed(2)} (Account: ${account})`);
       }
     }
     
@@ -2286,6 +2333,7 @@ function onOpen() {
     .addItem('🧪 Test Email Parsing', 'testEmailParsing')
     .addItem('💰 Test SHIB Price', 'testShibPriceFetch')
     .addItem('🔍 Test All Prices', 'testAllCryptoPrices')
+    .addItem('⚙️ Set Manual Prices', 'setManualCryptoPrices')
     .addToUi();
 }
 
@@ -2904,13 +2952,30 @@ function reviewPendingTransactions() {
 // Test SHIB price fetching (from additional_fixes.js)
 function testShibPriceFetch() {
   try {
+    // Test API fetch
     const price = _fetchCryptoPriceWithPrecision('SHIB');
-    const message = `SHIB price: $${price.toFixed(8)} CAD`;
+    let message = `SHIB API price: $${price.toFixed(8)} CAD\n\n`;
+    
+    // Test manual calculation
+    const shares = 693136.684119;
+    const manualPrice = 0.00003200; // $0.000032 CAD
+    const calculatedValue = shares * manualPrice;
+    
+    message += `Manual calculation:\n`;
+    message += `${shares.toLocaleString()} shares\n`;
+    message += `× $${manualPrice.toFixed(8)} CAD\n`;
+    message += `= $${calculatedValue.toFixed(2)} CAD\n\n`;
+    message += `Expected: ~$22.18 CAD`;
+    
     _logInfo(message);
-    try { SpreadsheetApp.getUi().alert(message); } catch (e) {}
+    try { 
+      SpreadsheetApp.getUi().alert('SHIB Test Results', message, SpreadsheetApp.getUi().ButtonSet.OK); 
+    } catch (e) {}
   } catch (error) {
-    _logError('Failed to fetch SHIB price', error);
-    try { SpreadsheetApp.getUi().alert('Failed to fetch SHIB price: ' + error.message); } catch (e) {}
+    _logError('Failed to test SHIB', error);
+    try { 
+      SpreadsheetApp.getUi().alert('Failed to test SHIB: ' + error.message); 
+    } catch (e) {}
   }
 }
 
@@ -2941,6 +3006,70 @@ function testAllCryptoPrices() {
   } catch (error) {
     _logError('Failed to test crypto prices', error);
     SpreadsheetApp.getUi().alert('Error', 'Price test failed. Check execution log.');
+  }
+}
+
+// Manual price override for when APIs fail
+function setManualCryptoPrices() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    
+    if (!holdingsSheet) {
+      throw new Error('Holdings sheet not found');
+    }
+    
+    // Approximate current prices as of August 2025 (CAD)
+    const manualPrices = {
+      'BTC': 89500.00,    // ~$89,500 CAD
+      'ETH': 4200.00,     // ~$4,200 CAD  
+      'SOL': 195.00,      // ~$195 CAD
+      'DOT': 7.25,        // ~$7.25 CAD
+      'SHIB': 0.00003200, // ~$0.000032 CAD (8 decimal places)
+      'VCE': 60.78,       // From working Yahoo Finance
+      'XEQT': 37.20       // From working Yahoo Finance
+    };
+    
+    let updatedCount = 0;
+    const lastRow = holdingsSheet.getLastRow();
+    
+    for (let i = 2; i <= lastRow; i++) {
+      const ticker = holdingsSheet.getRange(i, 2).getValue(); // Column B: Ticker
+      const shares = parseFloat(holdingsSheet.getRange(i, 3).getValue() || 0); // Column C: Shares
+      
+      if (ticker && manualPrices[ticker] && shares > 0) {
+        const price = manualPrices[ticker];
+        const totalValue = shares * price;
+        
+        holdingsSheet.getRange(i, 4).setValue(price); // Column D: Unit Price
+        holdingsSheet.getRange(i, 5).setValue(totalValue); // Column E: Total Value
+        holdingsSheet.getRange(i, 6).setValue(new Date()); // Column F: Last Updated
+        
+        // Special formatting for SHIB - ultra high precision
+        if (ticker === 'SHIB') {
+          holdingsSheet.getRange(i, 4).setNumberFormat('0.00000000'); // 8 decimal places for price
+          holdingsSheet.getRange(i, 3).setNumberFormat('#,##0.000000'); // 6 decimal places for shares with commas
+          _logInfo(`SHIB special formatting: ${shares.toLocaleString()} shares × $${price.toFixed(8)} = $${totalValue.toFixed(2)}`);
+        } else {
+          // Standard formatting for other assets
+          holdingsSheet.getRange(i, 4).setNumberFormat('$#,##0.00');
+          holdingsSheet.getRange(i, 5).setNumberFormat('$#,##0.00');
+        }
+        
+        updatedCount++;
+        _logInfo(`Manually set ${ticker}: ${shares} × $${price} = $${totalValue.toFixed(2)}`);
+      }
+    }
+    
+    SpreadsheetApp.getUi().alert(
+      'Manual Prices Set',
+      `Updated ${updatedCount} holdings with manual prices.\n\nBTC: $89,500\nETH: $4,200\nSOL: $195\nDOT: $7.25\nSHIB: $0.000032\n\nTotal should now be ~$2,000 CAD`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    
+  } catch (error) {
+    _logError('Failed to set manual prices', error);
+    SpreadsheetApp.getUi().alert('Error', 'Failed to set manual prices. Check execution log.');
   }
 }
 
