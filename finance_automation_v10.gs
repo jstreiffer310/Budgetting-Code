@@ -1044,42 +1044,35 @@ function _updateHoldingsFromTrade(account, ticker, shares, cost) {
       return;
     }
     
-    // Find existing holding row
+    // Find existing holding row based on new structure: Account, Ticker, Shares, Unit Price, Total Value, Last Updated
     const existingRow = _findHoldingRow(holdingsSheet, ticker);
     
     if (existingRow > 0) {
       // Update existing holding
-      const currentShares = parseFloat(holdingsSheet.getRange(existingRow, 2).getValue() || 0);
+      const currentShares = parseFloat(holdingsSheet.getRange(existingRow, 3).getValue() || 0); // Column C: Shares
       const newShares = currentShares + shares;
       
       // Update shares
-      holdingsSheet.getRange(existingRow, 2).setValue(newShares);
-      
-      // Update cost basis (weighted average)
-      const currentCostBasis = parseFloat(holdingsSheet.getRange(existingRow, 3).getValue() || 0);
-      const totalCurrentValue = currentCostBasis * currentShares;
-      const newCostBasis = (totalCurrentValue + cost) / newShares;
-      holdingsSheet.getRange(existingRow, 3).setValue(newCostBasis);
+      holdingsSheet.getRange(existingRow, 3).setValue(newShares); // Column C: Shares
       
       // Update last updated
-      holdingsSheet.getRange(existingRow, 7).setValue(new Date());
+      holdingsSheet.getRange(existingRow, 6).setValue(new Date()); // Column F: Last Updated
       
-      _logInfo(`Updated ${ticker}: ${currentShares} + ${shares} = ${newShares} shares, new cost basis: ${newCostBasis.toFixed(4)}`);
+      _logInfo(`Updated ${ticker}: ${currentShares} + ${shares} = ${newShares} shares`);
       
     } else {
       // Add new holding
       const newRow = [
-        ticker,                    // Column A: Ticker
-        shares,                    // Column B: Shares
-        cost / shares,             // Column C: Cost Basis (price per share)
-        '',                        // Column D: Current Price (to be fetched)
-        '',                        // Column E: Current Value (to be calculated)
-        account,                   // Column F: Account
-        new Date()                 // Column G: Last Updated
+        account,                   // Column A: Account
+        ticker,                    // Column B: Ticker
+        shares,                    // Column C: Shares
+        '',                        // Column D: Unit Price (to be fetched)
+        '',                        // Column E: Total Value (to be calculated)
+        new Date()                 // Column F: Last Updated
       ];
       
       holdingsSheet.appendRow(newRow);
-      _logInfo(`Added new holding: ${ticker} - ${shares} shares at ${(cost/shares).toFixed(4)} per share`);
+      _logInfo(`Added new holding: ${ticker} - ${shares} shares in ${account}`);
     }
     
     // Immediately refresh price for this holding
@@ -1781,9 +1774,10 @@ function _refreshHoldingsData() {
     let updatedCount = 0;
     
     for (let i = 0; i < data.length; i++) {
-      // Use hardcoded indices based on standard holdings sheet structure
-      const ticker = data[i][0]; // Column A: Ticker
-      const shares = parseFloat(data[i][1] || 0); // Column B: Shares
+      // Based on your output: Account, Ticker, Shares, Unit Price, Total Value, Last Updated
+      const account = data[i][0]; // Column A: Account
+      const ticker = data[i][1]; // Column B: Ticker
+      const shares = parseFloat(data[i][2] || 0); // Column C: Shares
       
       if (!ticker || shares <= 0) continue;
       
@@ -1794,7 +1788,7 @@ function _refreshHoldingsData() {
       if (!price || price <= 0) {
         const formula = _buildGoogleFinanceFormula(ticker);
         if (formula) {
-          holdingsSheet.getRange(i + 2, 3).setFormula(formula); // Column C: Price
+          holdingsSheet.getRange(i + 2, 4).setFormula(formula); // Column D: Unit Price
           _logInfo(`Set Google Finance formula for ${ticker}: ${formula}`);
           continue;
         }
@@ -1803,19 +1797,19 @@ function _refreshHoldingsData() {
       if (price > 0) {
         const currentValue = shares * price;
         
-        holdingsSheet.getRange(i + 2, 3).setValue(price); // Column C: Price
-        holdingsSheet.getRange(i + 2, 4).setValue(currentValue); // Column D: Current Value
+        holdingsSheet.getRange(i + 2, 4).setValue(price); // Column D: Unit Price
+        holdingsSheet.getRange(i + 2, 5).setValue(currentValue); // Column E: Total Value
         holdingsSheet.getRange(i + 2, 6).setValue(new Date()); // Column F: Last Updated
         
         updatedCount++;
         
         // Special formatting for high-precision crypto prices (SHIB)
         if (ticker.toUpperCase().includes('SHIB') && price < 0.01) {
-          const cell = holdingsSheet.getRange(i + 2, 3);
-          cell.setNumberFormat('0.000000');
+          const cell = holdingsSheet.getRange(i + 2, 4);
+          cell.setNumberFormat('0.00000000');
         }
         
-        _logInfo(`Updated ${ticker}: ${shares} shares @ $${price.toFixed(6)} = $${currentValue.toFixed(2)}`);
+        _logInfo(`Updated ${ticker}: ${shares} shares @ $${price.toFixed(6)} = $${currentValue.toFixed(2)} (Account: ${account})`);
       }
     }
     
@@ -1891,7 +1885,8 @@ function _updateHoldingsFromEmail(holdings) {
 
 function _findHoldingRow(holdingsSheet, ticker) {
   try {
-    const data = holdingsSheet.getRange(2, 1, Math.max(1, holdingsSheet.getLastRow() - 1), 1).getValues();
+    // Search in column B (Ticker) based on new structure: Account, Ticker, Shares, Unit Price, Total Value, Last Updated
+    const data = holdingsSheet.getRange(2, 2, Math.max(1, holdingsSheet.getLastRow() - 1), 1).getValues();
     
     for (let i = 0; i < data.length; i++) {
       if (data[i][0] && data[i][0].toString().trim().toUpperCase() === ticker.toUpperCase()) {
@@ -2392,13 +2387,13 @@ function setupSheetsManually(ss) {
     let holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
     if (!holdingsSheet) {
       holdingsSheet = ss.insertSheet(SHEET_NAMES.HOLDINGS);
-      const headers = ['Ticker', 'Shares', 'Cost Basis', 'Current Price', 'Current Value', 'Account', 'Last Updated'];
+      const headers = ['Account', 'Ticker', 'Shares', 'Unit Price (CAD)', 'Total Value (CAD)', 'Last Updated'];
       holdingsSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       holdingsSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
     } else {
       // Holdings sheet exists - only add headers if completely empty
       if (holdingsSheet.getLastRow() === 0) {
-        const headers = ['Ticker', 'Shares', 'Cost Basis', 'Current Price', 'Current Value', 'Account', 'Last Updated'];
+        const headers = ['Account', 'Ticker', 'Shares', 'Unit Price (CAD)', 'Total Value (CAD)', 'Last Updated'];
         holdingsSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
         holdingsSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f0f0f0');
       }
@@ -2927,13 +2922,12 @@ function initializeHoldingsData() {
     
     for (const [symbol, data] of Object.entries(CURRENT_HOLDINGS)) {
       const row = [
-        data.ticker,           // Column A: Ticker
-        data.shares,           // Column B: Shares
-        '',                    // Column C: Cost Basis (to be calculated)
-        '',                    // Column D: Current Price (to be fetched)
-        '',                    // Column E: Current Value (to be calculated)
-        data.account,          // Column F: Account
-        new Date()             // Column G: Last Updated
+        data.account,          // Column A: Account
+        data.ticker,           // Column B: Ticker
+        data.shares,           // Column C: Shares
+        '',                    // Column D: Unit Price (to be fetched)
+        '',                    // Column E: Total Value (to be calculated)
+        new Date()             // Column F: Last Updated
       ];
       
       holdingsSheet.appendRow(row);
