@@ -32,36 +32,130 @@ function _toNumber(v) {
 }
 // ...existing code...
 function learnCategories() {
-  // ...existing code...
-  // This is a stub to prevent ReferenceError. Implement logic as needed.
-  _logInfo('learnCategories called (stub implementation)');
+  try {
+    const ss = _ss();
+    _ensureSheetsAndHeaders();
+    const txSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const catSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    
+    // Preserve existing category mappings
+    const existingCategories = {};
+    if (catSheet.getLastRow() > 1) {
+      const existingData = catSheet.getRange(2, 1, catSheet.getLastRow() - 1, 2).getValues();
+      existingData.forEach(row => {
+        if (row[0] && row[1]) existingCategories[_normalize(row[0]).toLowerCase()] = row[1];
+      });
+    }
+    
+    // Extract transactions data
+    const lastRow = Math.max(0, txSheet.getLastRow() - 1);
+    if (lastRow === 0) {
+      try { SpreadsheetApp.getUi().alert('No transactions to analyze.'); } catch (e) {}
+      return;
+    }
+    
+    const txData = txSheet.getRange(2, 1, lastRow, 5).getValues();
+    
+    // Collect merchant data and manual categories
+    const merchantCategoryMap = {};
+    const manualCategories = new Set();
+    
+    txData.forEach(row => {
+      const merchant = _normalize(row[COLUMNS.TRANSACTIONS.TO - 1]);
+      const category = _normalize(row[COLUMNS.TRANSACTIONS.CATEGORY - 1]);
+      const amount = Math.abs(parseFloat(row[COLUMNS.TRANSACTIONS.AMOUNT - 1]) || 0);
+      
+      if (merchant && category && category !== 'Uncategorized' && category !== 'Unknown') {
+        if (!merchantCategoryMap[merchant]) merchantCategoryMap[merchant] = {};
+        merchantCategoryMap[merchant][category] = (merchantCategoryMap[merchant][category] || 0) + 1;
+        manualCategories.add(category);
+      }
+    });
+    
+    // Create potential keywords from merchants
+    const keywordStats = {};
+    
+    Object.keys(merchantCategoryMap).forEach(merchant => {
+      // Extract potential keywords from merchant name
+      const words = merchant.toLowerCase()
+                           .replace(/[^a-z0-9\s]/g, ' ')
+                           .split(/\s+/)
+                           .filter(w => w.length > 2 && !CATEGORY_STOPWORDS.has(w.toLowerCase()));
+      
+      // Find most common category for this merchant
+      const categories = merchantCategoryMap[merchant];
+      const topCategory = Object.keys(categories).sort((a, b) => categories[b] - categories[a])[0];
+      
+      words.forEach(word => {
+        if (!keywordStats[word]) keywordStats[word] = { count: 0, categories: {} };
+        keywordStats[word].count++;
+        keywordStats[word].categories[topCategory] = 
+          (keywordStats[word].categories[topCategory] || 0) + 1;
+      });
+    });
+    
+    // Identify meaningful keywords (appear multiple times and not in stopwords)
+    const meaningfulKeywords = Object.keys(keywordStats)
+      .filter(k => keywordStats[k].count >= 2 && !existingCategories[k])
+      .sort((a, b) => keywordStats[b].count - keywordStats[a].count);
+    
+    // Prepare data for updating categories sheet
+    const newEntries = [];
+    
+    meaningfulKeywords.forEach(keyword => {
+      // Find best category for this keyword
+      const categories = keywordStats[keyword].categories;
+      const suggestedCategory = Object.keys(categories)
+        .sort((a, b) => categories[b] - categories[a])[0];
+      
+      newEntries.push([keyword, suggestedCategory || '']);
+    });
+    
+    // Also add manual categories that aren't in the categories sheet
+    manualCategories.forEach(category => {
+      // Create an entry with the category name as both keyword and category
+      // This ensures manually entered categories get recognized
+      if (!Object.values(existingCategories).includes(category)) {
+        newEntries.push([category.toLowerCase(), category]);
+      }
+    });
+    
+    // Add new entries to the sheet (don't overwrite existing)
+    if (newEntries.length > 0) {
+      newEntries.sort((a, b) => a[0].localeCompare(b[0]));
+      newEntries.forEach(entry => catSheet.appendRow(entry));
+    }
+    
+    const message = `Category learning complete.\n\n` +
+                    `• ${newEntries.length} new category keywords added\n` +
+                    `• ${manualCategories.size} manual categories processed`;
+                    
+    try { SpreadsheetApp.getUi().alert(message); } catch (e) {}
+    _logInfo('Category learning completed', { 
+      newKeywords: newEntries.length, 
+      manualCategories: manualCategories.size 
+    });
+    
+  } catch (error) {
+    _logError('Category learning failed', error);
+    try { SpreadsheetApp.getUi().alert('Category learning failed: ' + error.message); } catch (e) {}
+  }
 }
 /**
- * FINANCE AUTOMATION V6 - ROBUST MERGED SYSTEM
- * ===========================================
+ * FINANCE AUTOMATION V8.00 - COMPREHENSIVE UPGRADE
+ * ===============================================
  * 
- * This version combines the best features from all previous versions while addressing
- * critical issues that have persisted across iterations:
- * 
- * KEY IMPROVEMENTS ADDRESSED:
- * - Eliminated "Cash" phantom account creation
- * - Fixed category cell formatting and spillover issues
- * - Robust duplicate detection with multiple fallback methods
- * - Enhanced staging/pairing system with configurable time windows
+ * Significant improvements in this version:
+ * - Fixed category classification to avoid unhelpful/generic keywords
+ * - Proper investment value aggregation for Wealthsimple accounts
+ * - Enhanced dashboard with proper category recognition from manual entries
+ * - Fixed SHIB and other small-decimal cryptocurrency price fetching
+ * - Improved transfer recipient detection for Interac/PC Financial
+ * - Added transaction review system for pending/unclear items
  * - Comprehensive error handling and recovery mechanisms
- * - Improved CIBC email parsing with subject-line prioritization
- * - Better account balance tracking with audit trails
- * - Holdings management with automatic price updates
- * - Configurable dashboard with multiple chart modes
- * - Security best practices implementation
- * - Extensive logging and monitoring capabilities
  * 
- * ARCHITECTURE PRINCIPLES:
- * - Fail-safe defaults: System continues functioning even with partial failures
- * - Idempotent operations: Safe to run multiple times
- * - Comprehensive validation: Data integrity checks at every step
- * - Extensible design: Easy to add new parsers and features
- * - Performance optimized: Minimal API calls and efficient data processing
+ * Last Updated: 2025-08-20
+ * Author: jstreiffer310 (with AI assistance)
  */
 
 // ===================== CONFIGURATION & CONSTANTS =====================
@@ -143,7 +237,9 @@ const CONFIG = {
   STALE_CLEANUP_HOURS: 72, // Clean up staging entries after 72 hours
   PIE_MODE: 'AMOUNT', // 'AMOUNT' or 'COUNT'
   MAX_PROCESSING_ATTEMPTS: 3,
-  DASHBOARD_ANALYSIS_DAYS: 30
+  DASHBOARD_ANALYSIS_DAYS: 30,
+  CRYPTO_API_RATE_LIMIT: 300,
+  YAHOO_FINANCE_RATE_LIMIT: 200
 };
 
 // Account definitions - CRITICAL: Only these accounts get balance updates
@@ -189,6 +285,40 @@ const CSV_PROFILES = [
     columnMap: { date: 4, description: 1, amount: 6 }
   }
 ];
+
+// Cryptocurrency mappings for API calls
+const CRYPTO_MAPPINGS = {
+  'BTC-USD': 'bitcoin',
+  'ETH-USD': 'ethereum',
+  'DOT-USD': 'polkadot',
+  'SOL-USD': 'solana',
+  'SHIB-USD': 'shiba-inu',
+  'ADA-USD': 'cardano',
+  'MATIC-USD': 'matic-network',
+  'DOGE-USD': 'dogecoin',
+  'BTC': 'bitcoin',
+  'ETH': 'ethereum',
+  'SHIB': 'shiba-inu'
+};
+
+// Extensive stopwords list for category learning
+const CATEGORY_STOPWORDS = new Set([
+  // Banking terms
+  'financial', 'cibc', 'amount', 'auto', 'logged', 'aventura', 'wealthsimple', 'money',
+  'pad', 'deposit', 'card', 'cash', 'credit', 'standalone', 'purchase', 'trade', 
+  'unknown', 'sender', 'interac', 'transfer', 'received', 'streiffer', 'been',
+  'automatically', 'deposited', 'bank', 'banking', 'charge', 'payment', 'bill', 
+  'etransfer', 'transaction', 'statement', 'balance', 'online', 'account', 'fee',
+  'service', 'interest', 'dividend', 'inc', 'ltd', 'corp', 'limited', 'llc',
+  'confirmation', 'receipt', 'monthly', 'annual', 'quarterly', 'processed',
+  'merchant', 'purchase', 'paid', 'paym', 'withdrawal', 'debit', 'credit',
+  
+  // Common English words
+  'from', 'with', 'your', 'for', 'and', 'the', 'has', 'was', 'you', 'have', 'this',
+  'that', 'are', 'had', 'not', 'been', 'were', 'they', 'but', 'also', 'their',
+  'will', 'would', 'should', 'could', 'when', 'where', 'what', 'which', 'who', 'whom',
+  'whose', 'how', 'why', 'because', 'though', 'although'
+]);
 
 // ===================== LOGGING FUNCTIONS (MOVED TO TOP) =====================
 function _logInfo(message, context = {}) {
@@ -594,98 +724,136 @@ function _chooseMostNegativeCibcCard(accountsSheet) {
 
 // ===================== PC FINANCIAL EMAIL PARSER =====================
 
+// IMPROVED: PC Financial Email Parser with better recipient handling
 function _parsePcFinancialEmail(message, subject, body) {
-  const subjectLower = _lc(subject);
-  const bodyLower = _lc(body);
-  
-  // Purchase notice
-  if (subjectLower.includes('purchase notice') || /purchase amount/i.test(bodyLower)) {
-    const amount = _extractAmount(body, /purchase amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) ||
-                   _extractAmount(body);
-    if (!amount) return null;
+  try {
+    const subjectLower = _lc(subject);
+    const bodyLower = _lc(body);
     
-    const merchant = _extractText(body, /merchant[:\s]*([^\n\r]+)/i) ||
-                     _extractText(body, /at\s+([A-Z0-9 \._\-&']+)/i) ||
-                     'Merchant';
-    
-    // Check if this is a Wealthsimple deposit (should be staged)
-    if (/wealthsimple/i.test(merchant)) {
+    // Purchase notice
+    if (subjectLower.includes('purchase notice') || /purchase amount/i.test(bodyLower)) {
+      const amount = _extractAmount(body, /purchase amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) ||
+                     _extractAmount(body);
+      if (!amount) return null;
+      
+      const merchant = _extractText(body, /merchant[:\s]*([^\n\r]+)/i) ||
+                       _extractText(body, /at\s+([A-Z0-9 \._\-&']+)/i) ||
+                       'Merchant';
+      
+      // Check if this is a Wealthsimple deposit (should be staged)
+      if (/wealthsimple/i.test(merchant)) {
+        return {
+          date: message.getDate(),
+          amount: -Math.abs(amount),
+          direction: 'OUT',
+          fromAccount: 'PC Financial',
+          toAccount: 'Pending Wealthsimple',
+          bank: 'PC Financial Purchase',
+          emailId: message.getId(),
+          type: 'Transfer',
+          shouldStage: true,
+          notes: `Wealthsimple deposit - awaiting confirmation`
+        };
+      }
+      
       return {
         date: message.getDate(),
         amount: -Math.abs(amount),
         direction: 'OUT',
         fromAccount: 'PC Financial',
-        toAccount: 'Pending Wealthsimple',
+        toAccount: merchant,
         bank: 'PC Financial Purchase',
         emailId: message.getId(),
-        type: 'Transfer',
-        shouldStage: true
+        type: 'Purchase',
+        notes: `Purchase at ${merchant}`
       };
     }
     
-    return {
-      date: message.getDate(),
-      amount: -Math.abs(amount),
-      direction: 'OUT',
-      fromAccount: 'PC Financial',
-      toAccount: merchant,
-      bank: 'PC Financial Purchase',
-      emailId: message.getId(),
-      type: 'Purchase',
-      notes: `Purchase at ${merchant}`
-    };
+    // E-transfer sent - IMPROVED recipient detection
+    if (subjectLower.includes('transfer to') || /e-transfer/i.test(bodyLower)) {
+      const amount = _extractAmount(subject) || _extractAmount(body);
+      if (!amount) return null;
+      
+      // Try multiple patterns to extract recipient
+      const recipient = _extractText(subject, /transfer to\s+(.+?)\s+has been/i) ||
+                       _extractText(body, /transfer to\s+(.+?)\s+has been/i) ||
+                       _extractText(body, /recipient[:\s]*([^\n\r]+)/i) ||
+                       _extractText(body, /sent to[:\s]*([^\n\r]+)/i);
+      
+      // If we can't determine recipient, mark as pending
+      if (!recipient) {
+        return {
+          date: message.getDate(),
+          amount: -Math.abs(amount),
+          direction: 'OUT',
+          fromAccount: 'PC Financial',
+          toAccount: 'Pending - Unknown Recipient',
+          bank: 'PC Financial e-Transfer',
+          emailId: message.getId(),
+          type: 'External Transfer',
+          shouldStage: true,
+          notes: 'Unable to determine recipient - requires manual review'
+        };
+      }
+      
+      // Check if this is an internal transfer
+      const normalizedRecipient = _normalizeAccountName(recipient);
+      const isInternal = _isInternalAccount(normalizedRecipient);
+      
+      return {
+        date: message.getDate(),
+        amount: -Math.abs(amount),
+        direction: 'OUT',
+        fromAccount: 'PC Financial',
+        toAccount: isInternal ? normalizedRecipient : `External to ${recipient}`,
+        bank: 'PC Financial e-Transfer',
+        emailId: message.getId(),
+        type: isInternal ? 'Internal Transfer' : 'External Transfer',
+        shouldStage: isInternal,
+        notes: isInternal ? `Internal transfer to ${normalizedRecipient}` : `External transfer to ${recipient}`
+      };
+    }
+    
+    return null;
+  } catch (error) {
+    _logError('Failed to parse PC Financial email', error);
+    return null;
   }
-  
-  // E-transfer sent
-  if (subjectLower.includes('transfer to') || /e-transfer/i.test(bodyLower)) {
-    const amount = _extractAmount(subject) || _extractAmount(body);
-    if (!amount) return null;
-    
-    const recipient = _extractText(subject, /transfer to\s+(.+?)\s+has been/i) ||
-                     _extractText(body, /transfer to\s+(.+?)\s+has been/i) ||
-                     'External Recipient';
-    
-    // Check if this is an internal transfer
-    const normalizedRecipient = _normalizeAccountName(recipient);
-    const isInternal = _isInternalAccount(normalizedRecipient);
-    
-    return {
-      date: message.getDate(),
-      amount: -Math.abs(amount),
-      direction: 'OUT',
-      fromAccount: 'PC Financial',
-      toAccount: isInternal ? normalizedRecipient : `External to ${recipient}`,
-      bank: 'PC Financial e-Transfer',
-      emailId: message.getId(),
-      type: isInternal ? 'Internal Transfer' : 'External Transfer',
-      shouldStage: isInternal
-    };
-  }
-  
-  return null;
 }
 
 // ===================== INTERAC EMAIL PARSER =====================
 
+// IMPROVED: Interac Email Parser with better sender extraction
 function _parseInteracEmail(message, subject, body) {
-  const amount = _extractAmount(body, /sent you \$([0-9,]+\.[0-9]{2})/i) ||
-                 _extractAmount(body, /amount[:\s]*\$([0-9,]+\.[0-9]{2})/i);
-  
-  if (!amount) return null;
-  
-  const sender = _extractText(body, /([A-Za-z0-9 .'-]+) sent you \$/i) || 'Interac Sender';
-  
-  return {
-    date: message.getDate(),
-    amount: amount,
-    direction: 'IN',
-    fromAccount: `e-Transfer from ${sender}`,
-    toAccount: 'PC Financial', // Assume default deposit account
-    bank: 'Interac Deposit',
-    emailId: message.getId(),
-    type: 'Interac',
-    notes: `Received from ${sender}`
-  };
+  try {
+    // Multiple patterns to extract amount
+    const amount = _extractAmount(body, /sent you \$([0-9,]+\.[0-9]{2})/i) ||
+                   _extractAmount(body, /amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) ||
+                   _extractAmount(subject, /\$([0-9,]+\.[0-9]{2})/i);
+    
+    if (!amount) return null;
+    
+    // Multiple patterns to extract sender
+    const sender = _extractText(body, /([A-Za-z0-9 .'-]+) sent you \$/i) || 
+                  _extractText(body, /From[:\s]*([A-Za-z0-9 .'-]+)/i) ||
+                  _extractText(subject, /from ([A-Za-z0-9 .'-]+)/i) ||
+                  'Unknown Sender';
+    
+    return {
+      date: message.getDate(),
+      amount: amount,
+      direction: 'IN',
+      fromAccount: `e-Transfer from ${sender}`,
+      toAccount: 'PC Financial', // Default deposit account
+      bank: 'Interac Deposit',
+      emailId: message.getId(),
+      type: 'Interac',
+      notes: `Received from ${sender}`
+    };
+  } catch (error) {
+    _logError('Failed to parse Interac email', error);
+    return null;
+  }
 }
 
 // ===================== WEALTHSIMPLE EMAIL PARSER =====================
@@ -1172,6 +1340,35 @@ function _getUsdToCadRate() {
   }
 }
 
+// IMPROVED: Better ticker support and formula building
+function _buildGoogleFinanceFormula(ticker) {
+  try {
+    if (!ticker) return null;
+    
+    const cleanTicker = ticker.replace(/[^\w\.\-]/g, '').toUpperCase();
+    
+    if (cleanTicker.endsWith('-TSE')) {
+      const symbol = cleanTicker.replace('-TSE', '');
+      return `=IFERROR(GOOGLEFINANCE("TSE:${symbol}","price"),0)`;
+    } 
+    else if (cleanTicker.includes('.TO')) {
+      const symbol = cleanTicker.replace('.TO', '');
+      return `=IFERROR(GOOGLEFINANCE("TSE:${symbol}","price"),0)`;
+    } 
+    else if (cleanTicker.includes('-USD')) {
+      // For USD assets, apply exchange rate
+      return `=IFERROR(GOOGLEFINANCE("CURRENCY:USDCAD")*GOOGLEFINANCE("${cleanTicker}","price"),0)`;
+    } 
+    else {
+      // Regular US stocks
+      return `=IFERROR(GOOGLEFINANCE("${cleanTicker}","price"),0)`;
+    }
+  } catch (error) {
+    _logError(`Failed to build GOOGLEFINANCE formula for ${ticker}`, error);
+    return null;
+  }
+}
+
 function _fetchPriceGoogleFinance(ticker) {
   try {
     if (/^[A-Z]{3,4}-[A-Z]{3}$/.test(ticker)) return null;
@@ -1180,6 +1377,52 @@ function _fetchPriceGoogleFinance(ticker) {
     else formula = `=GOOGLEFINANCE("${ticker}", "price")`;
     return formula;
   } catch (e) { return null; }
+}
+
+// IMPROVED: Better Yahoo Finance API handling
+function _fetchYahooFinancePrice(ticker) {
+  try {
+    // Handle different ticker formats
+    let yahooTicker = ticker;
+    if (ticker.includes('-TSE')) {
+      yahooTicker = ticker.replace('-TSE', '.TO');
+    }
+    
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}`;
+    const response = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Finance-Automation/8.0)'
+      }
+    });
+    
+    if (response.getResponseCode() !== 200) {
+      return 0;
+    }
+    
+    const data = JSON.parse(response.getContentText());
+    
+    if (data && data.chart && data.chart.result && 
+        data.chart.result[0] && data.chart.result[0].meta) {
+      
+      const meta = data.chart.result[0].meta;
+      let price = meta.regularMarketPrice;
+      const currency = meta.currency || 'USD';
+      
+      // Convert USD prices to CAD
+      if (currency === 'USD') {
+        const usdToCadRate = _getUsdToCadRate();
+        price *= usdToCadRate;
+      }
+      
+      return price;
+    }
+    
+    return 0;
+  } catch (error) {
+    _logError(`Failed to fetch Yahoo Finance price for ${ticker}`, error);
+    return 0;
+  }
 }
 
 function _fetchPriceYahooFinance(ticker) {
@@ -1193,6 +1436,52 @@ function _fetchPriceYahooFinance(ticker) {
     const currency = data.quoteResponse.result[0]?.currency || 'CAD';
     return { price, currency };
   } catch (e) { return null; }
+}
+
+// IMPROVED: Better cryptocurrency support
+function _fetchCryptoPriceWithPrecision(ticker) {
+  try {
+    const tickerUpper = ticker.toUpperCase();
+    let cryptoId = null;
+    
+    // Find correct ID for the cryptocurrency
+    for (const [cryptoTicker, id] of Object.entries(CRYPTO_MAPPINGS)) {
+      if (tickerUpper.includes(cryptoTicker)) {
+        cryptoId = id;
+        break;
+      }
+    }
+    
+    if (!cryptoId) return 0;
+    
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=usd,cad&precision=18`;
+    const response = UrlFetchApp.fetch(url, { 
+      muteHttpExceptions: true,
+      headers: { 'Accept': 'application/json' } 
+    });
+    
+    if (response.getResponseCode() !== 200) {
+      _logError(`CoinGecko API error: ${response.getResponseCode()}`);
+      return 0;
+    }
+    
+    const data = JSON.parse(response.getContentText());
+    
+    // Get price in CAD if available, otherwise convert from USD
+    if (data && data[cryptoId]) {
+      if (data[cryptoId].cad) {
+        return parseFloat(data[cryptoId].cad);
+      } else if (data[cryptoId].usd) {
+        const usdToCadRate = _getUsdToCadRate();
+        return parseFloat(data[cryptoId].usd) * usdToCadRate;
+      }
+    }
+    
+    return 0;
+  } catch (error) {
+    _logError(`Failed to fetch crypto price for ${ticker}`, error);
+    return 0;
+  }
 }
 
 function _fetchPriceCoinGecko(ticker) {
@@ -1231,35 +1520,20 @@ function _isSupportedTicker(ticker) {
 function _fetchPriceFromAPI(ticker) {
   try {
     if (!ticker) return 0;
-    const usdToCad = _getUsdToCadRate();
-
-    // 1) Try Yahoo Finance (returns {price, currency})
-    const yf = _fetchPriceYahooFinance(ticker);
-    if (yf && typeof yf.price === 'number' && !isNaN(yf.price) && yf.price > 0) {
-      const price = yf.currency === 'USD' ? yf.price * usdToCad : yf.price;
-      return Number(price || 0);
-    }
-
-    // 2) Try CoinGecko for known crypto mappings
-    const cg = _fetchPriceCoinGecko(ticker);
-    if (cg && typeof cg === 'number' && cg > 0) {
-      return Number(cg);
-    }
-
-    // 3) If ticker looks like USD-denominated (ends with -USD) and Yahoo failed,
-    // attempt to strip suffix and retry (some APIs expect plain symbol)
-    if (/-USD$/i.test(ticker)) {
-      const candidate = ticker.replace(/-USD$/i, '');
-      const yf2 = _fetchPriceYahooFinance(candidate);
-      if (yf2 && typeof yf2.price === 'number' && yf2.price > 0) {
-        return yf2.currency === 'USD' ? yf2.price * usdToCad : yf2.price;
+    const tickerUpper = ticker.toUpperCase();
+    
+    // Special handling for cryptocurrencies
+    for (const cryptoTicker of Object.keys(CRYPTO_MAPPINGS)) {
+      if (tickerUpper.includes(cryptoTicker)) {
+        return _fetchCryptoPriceWithPrecision(ticker);
       }
     }
-
-    // 4) No price found
-    return 0;
+    
+    // For stocks and ETFs, try Yahoo Finance
+    return _fetchYahooFinancePrice(ticker);
+    
   } catch (error) {
-    console.error('Error in _fetchPriceFromAPI for', ticker, error);
+    _logError(`Failed to fetch price from API for ${ticker}`, error);
     return 0;
   }
 }
@@ -1312,154 +1586,169 @@ function _updateHoldingsQuantity(accountName, ticker, sharesDelta) {
   }
 }
 
-// Wrapper kept for backward compatibility — delegates to canonical implementation
-function updateHoldingsAndBalances() {
-  try {
-    // call the manual/authoritative function logic implemented later in file
-    return (function(){
-      const impl = arguments.callee.caller; // noop: preserve signature
-      // Call the canonical implementation below by name
-      return (typeof updateHoldingsAndBalances === 'function') ? undefined : undefined;
-    })();
-  } catch (e) {
-    // noop
-  }
-}
-
-// ===================== MANUAL FUNCTIONS FOR IMMEDIATE FIXES =====================
+// IMPROVED: Better investment account balance calculation
 function updateHoldingsAndBalances() {
   try {
     const ss = _ss();
-    const holdingsSheet = ss.getSheetByName(HOLDINGS_SHEET_NAME);
-    const accountsSheet = ss.getSheetByName(ACCOUNTS_SHEET_NAME);
-
-    // Update headers for clarity
-    holdingsSheet.getRange(1, 1, 1, 6).setValues([
-      ['Account', 'Ticker', 'Shares', 'Unit Price (CAD)', 'Total Value (CAD)', 'Last Updated']
-    ]);
-
+    _ensureSheetsAndHeaders();
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+    
     if (!holdingsSheet || holdingsSheet.getLastRow() < 2) {
       _logInfo('Holdings sheet is empty, skipping update');
       return;
     }
 
-    const numCols = Object.keys(COLUMNS.HOLDINGS).length;
-    const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, numCols).getValues();
-    const usdToCad = _getUsdToCadRate();
+    // Get all holdings data
+    const holdingsData = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, 
+                         Object.keys(COLUMNS.HOLDINGS).length).getValues();
+    
+    // Initialize account totals object
     const accountTotals = {};
-
-    for (let i = 0; i < data.length; i++) {
-      const row = i + 2;
-      const account = _normalize(data[i][COLUMNS.HOLDINGS.ACCOUNT - 1]);
-      const ticker = _normalize(data[i][COLUMNS.HOLDINGS.TICKER - 1]);
-  const shares = _toNumber(data[i][COLUMNS.HOLDINGS.SHARES - 1]);
-      let price = null;
-      let source = '';
-
-      // 1. GOOGLEFINANCE
-      const gfFormula = _fetchPriceGoogleFinance(ticker);
-      if (gfFormula) {
-        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setFormula(gfFormula);
-        SpreadsheetApp.flush();
-        price = parseFloat(holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).getValue() || 0);
-        source = 'GOOGLEFINANCE';
+    let updatedCount = 0;
+    let errorCount = 0;
+    
+    _logInfo(`Processing ${holdingsData.length} holdings entries`);
+    
+    // Process each holding
+    for (let i = 0; i < holdingsData.length; i++) {
+      const row = i + 2; // Adjust for 1-indexed and header row
+      const account = _normalize(holdingsData[i][COLUMNS.HOLDINGS.ACCOUNT - 1]);
+      const ticker = _normalize(holdingsData[i][COLUMNS.HOLDINGS.TICKER - 1]);
+      const shares = parseFloat(holdingsData[i][COLUMNS.HOLDINGS.SHARES - 1] || 0);
+      
+      if (!account || !ticker || isNaN(shares) || shares === 0) {
+        _logWarning(`Skipping invalid holding at row ${row}: ${ticker}`);
+        continue;
       }
-
-      // 2. Yahoo Finance
-      if (!price || price === 0 || isNaN(price)) {
-        const yf = _fetchPriceYahooFinance(ticker);
-        if (yf && yf.price) {
-          price = yf.price * (yf.currency === 'USD' ? usdToCad : 1);
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue(price);
-          source = 'Yahoo Finance';
-        } else {
-          // try unified API fallback
-          const apiPrice = _fetchPriceFromAPI(ticker);
-          if (apiPrice && apiPrice > 0) {
-            price = apiPrice;
-            holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue(price);
-            source = 'API Fallback';
+      
+      _logInfo(`Processing ${ticker} in ${account}: ${shares} shares`);
+      
+      try {
+        let price = 0;
+        let priceSource = 'Unknown';
+        
+        // Special handling for SHIB and other small decimal cryptocurrencies
+        if (ticker.toUpperCase() === 'SHIB-USD' || ticker.toUpperCase() === 'SHIB') {
+          price = _fetchCryptoPriceWithPrecision(ticker);
+          priceSource = 'Crypto API (High Precision)';
+        } 
+        // Standard price fetching for other assets
+        else {
+          // Try to get price from GOOGLEFINANCE formula if it exists
+          const priceCell = holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD);
+          const currentValue = priceCell.getValue();
+          
+          if (typeof currentValue === 'number' && currentValue > 0) {
+            price = currentValue;
+            priceSource = 'Existing Cell Value';
+          }
+          // If no formula or value is 0, try API
+          else {
+            if (_isSupportedTicker(ticker)) {
+              // For supported tickers, set GOOGLEFINANCE formula
+              const formula = _buildGoogleFinanceFormula(ticker);
+              if (formula) {
+                priceCell.setFormula(formula);
+                Utilities.sleep(200); // Give time for formula to calculate
+                SpreadsheetApp.flush();
+                
+                const formulaValue = priceCell.getValue();
+                if (typeof formulaValue === 'number' && formulaValue > 0) {
+                  price = formulaValue;
+                  priceSource = 'GOOGLEFINANCE';
+                }
+              }
+            }
+            
+            // If still no price, try API
+            if (price === 0) {
+              price = _fetchPriceFromAPI(ticker);
+              if (price > 0) {
+                priceCell.setValue(price);
+                priceSource = 'External API';
+              }
+            }
           }
         }
-      }
-
-      // 3. CoinGecko (crypto)
-      if ((!price || price === 0 || isNaN(price))) {
-        const cg = _fetchPriceCoinGecko(ticker);
-        if (cg && cg > 0) {
-          price = cg;
-          holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue(price);
-          source = 'CoinGecko';
-        }
-      }
-
-      // 4. Final fallback: if cell contains 'Manual' or price still missing, try unified API once more
-      if ((!price || price === 0 || isNaN(price))) {
-        // read existing cell value in case someone entered a manual numeric price
-        const existingRaw = holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).getValue();
-        const existing = _toNumber(existingRaw);
-        if (existing > 0) {
-          price = existing; source = 'ManualCell';
+        
+        // Calculate total value
+        const totalValue = price * shares;
+        
+        // Update total value cell
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setValue(totalValue);
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
+        
+        // Format cells
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setNumberFormat('$#,##0.000000');
+        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setNumberFormat('$#,##0.00');
+        
+        // Add to account totals
+        if (totalValue > 0) {
+          if (!accountTotals[account]) accountTotals[account] = 0;
+          accountTotals[account] += totalValue;
+          updatedCount++;
+          _logInfo(`Updated ${ticker}: ${shares} × $${price} = $${totalValue} (${priceSource})`);
         } else {
-          const final = _fetchPriceFromAPI(ticker);
-          if (final && final > 0) { price = final; source = 'API Final'; holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue(price); }
+          errorCount++;
+          _logWarning(`Failed to get valid price for ${ticker}`);
         }
+      } catch (error) {
+        errorCount++;
+        _logError(`Error processing ${ticker} in ${account}`, error);
       }
-
-      if (!price || price === 0 || isNaN(price)) {
-        holdingsSheet.getRange(row, COLUMNS.HOLDINGS.UNIT_PRICE_CAD).setValue('Manual');
-        price = 0;
-        source = source || 'Manual';
-      }
-
-      // Calculate value
-      const value = Number(price || 0) * Number(shares || 0);
-      holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setValue(value);
-      holdingsSheet.getRange(row, COLUMNS.HOLDINGS.TOTAL_VALUE_CAD).setNumberFormat('$#,##0.00');
-      holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
-
-      // Accumulate totals
-  if (value > 0 && account) accountTotals[account] = (accountTotals[account] || 0) + value;
-
-      // Log source
-      _logInfo(`Updated ${ticker}: ${price} CAD via ${source}`);
+      
+      // Add delay to avoid API rate limits
+      Utilities.sleep(200);
     }
-
-    // Update account balances
+    
+    // Update account balances based on holdings
+    _logInfo(`Updating account balances with totals:`, accountTotals);
+    
     for (const [accountName, totalValue] of Object.entries(accountTotals)) {
-      const accountRow = _findAccountRow(accountsSheet, accountName);
-      if (accountRow > 0) {
-        accountsSheet.getRange(accountRow, 2).setValue(totalValue);
-        accountsSheet.getRange(accountRow, 2).setNumberFormat('$#,##0.00');
-        accountsSheet.getRange(accountRow, 3).setValue(new Date());
+      try {
+        // Find account row
+        const accountRow = _findAccountRow(accountsSheet, accountName);
+        
+        if (accountRow > 0) {
+          _logInfo(`Updating ${accountName} balance to $${totalValue.toFixed(2)}`);
+          
+          // Update balance and last updated
+          accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.BALANCE).setValue(totalValue);
+          accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.BALANCE).setNumberFormat('$#,##0.00');
+          accountsSheet.getRange(accountRow, COLUMNS.ACCOUNTS.LAST_UPDATED).setValue(new Date());
+        } else {
+          _logWarning(`Could not find account ${accountName} in Accounts sheet`);
+        }
+      } catch (error) {
+        _logError(`Failed to update balance for ${accountName}`, error);
       }
     }
-
-    SpreadsheetApp.getUi().alert('✅ Holdings and balances updated in CAD!');
+    
+    const summary = `Holdings update completed:\n` +
+                    `• ${updatedCount} holdings updated\n` +
+                    `• ${errorCount} errors encountered\n` +
+                    `• ${Object.keys(accountTotals).length} account balances updated`;
+    
+    _logInfo(summary);
+    try { SpreadsheetApp.getUi().alert(summary); } catch (e) {}
+    
   } catch (error) {
-    _logError('Failed to update holdings and balances', error);
-    SpreadsheetApp.getUi().alert('❌ Failed to update holdings and balances. See logs.');
+    _logError('Holdings and balances update failed', error);
+    try { SpreadsheetApp.getUi().alert('Holdings update failed: ' + error.message); } catch (e) {}
   }
 }
+
+
 
 // ===================== MENU SYSTEM & MAIN FUNCTIONS =====================
 function onOpen() {
   try {
-    // First ensure sheets exist before any logging
     const ss = _ss();
-    console.log('Spreadsheet accessed successfully');
-    
-    // Safely ensure sheets without aggressive logging
     _ensureSheetsAndHeaders();
-    console.log('Sheets and headers ensured');
+    const ui = SpreadsheetApp.getUi();
     
-    // Create the menu
-    const menu = SpreadsheetApp.getUi()
-      .createMenu('💰 Finance Automation V6')
-      .addItem('� Setup Permissions', 'setupPermissions')
-      .addItem('🧪 Test Price Fetching (CAD)', 'testPriceFetchingCAD')
-      .addItem('�🔄 Manual Price Refresh (CAD)', 'updateHoldingsAndBalances')
-      .addSeparator()
+    const menu = ui.createMenu('💰 Finance Automation V8')
       .addItem('🔄 Process All', 'processEverything')
       .addSeparator()
       .addItem('📧 Process New Emails', 'processNewEmails')
@@ -1468,41 +1757,23 @@ function onOpen() {
       .addSeparator()
       .addItem('📈 Rebuild Dashboard', 'buildDashboard')
       .addItem('🏷️ Learn Categories', 'learnCategories')
-      .addItem('💡 Suggest Categories', 'suggestCategoriesFromTransactions')
+      .addItem('� Review Pending Transactions', 'reviewPendingTransactions')
       .addSeparator()
       .addItem('📁 Import from CSV', 'importFromCsv')
-      .addItem('🎨 Apply Formatting', 'applyConditionalFormatting')
       .addItem('🧹 Clean Stale Transactions', 'cleanupStaleTransactions')
       .addSeparator()
-      .addItem('🛠️ System Diagnostics', 'runSystemDiagnostics')
-      .addItem('📋 Show Configuration', 'showConfiguration');
+      .addItem('🧪 Test Price Fetching', 'testSinglePriceFetch')
+      .addItem('�️ System Diagnostics', 'runSystemDiagnostics');
+    
     menu.addToUi();
-    console.log('Finance Automation V6 menu created successfully');
-    _logInfo('Finance Automation V6 menu loaded successfully');
-function setupPermissions() {
-  try {
-    SpreadsheetApp.openById(SPREADSHEET_ID);
-    GmailApp.getInboxThreads(1);
-    DriveApp.getFiles();
-    Logger.log('Permissions setup completed');
-    SpreadsheetApp.getUi().alert('✅ Permissions setup completed successfully!');
+    _logInfo('Finance Automation V8 menu loaded successfully');
+    
   } catch (error) {
-    Logger.log('Permissions setup failed: ' + error);
-    SpreadsheetApp.getUi().alert('❌ Permissions setup failed. Please check permissions.');
+    _logError('Failed to create menu', error);
   }
-}
 
-function testPriceFetchingCAD() {
-  const ss = _ss();
-  const holdingsSheet = ss.getSheetByName(HOLDINGS_SHEET_NAME);
-  const data = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, 2).getValues();
-  let results = '';
-  for (let i = 0; i < data.length; i++) {
-    const ticker = data[i][1];
-    let price = null;
-    let source = '';
-    const gfFormula = _fetchPriceGoogleFinance(ticker);
-    if (gfFormula) {
+function onEdit(e) {
+  try {
       source = 'GOOGLEFINANCE';
       price = 'Formula';
     }
@@ -1713,18 +1984,196 @@ function processEverything() {
   }
 }
 
-// Lightweight dashboard builder stub to avoid runtime errors in automation runs
+// IMPROVED: Enhanced dashboard with proper category recognition
 function buildDashboard() {
   try {
     const ss = _ss();
-    const dashboard = ss.getSheetByName(SHEET_NAMES.DASHBOARD);
-    if (!dashboard) return;
-    // Minimal: clear and write a timestamp note
-    dashboard.clear();
-    dashboard.getRange(1,1).setValue('Dashboard last rebuilt: ' + new Date().toLocaleString());
-    _logInfo('Dashboard rebuilt (stub)');
+    const dashboardSheet = ss.getSheetByName(SHEET_NAMES.DASHBOARD);
+    const transactionsSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    
+    // Clear existing dashboard content
+    dashboardSheet.clear();
+    
+    // Set dashboard title
+    dashboardSheet.getRange(1, 1).setValue('Finance Dashboard');
+    dashboardSheet.getRange(1, 1).setFontSize(16).setFontWeight('bold');
+    dashboardSheet.getRange(1, 1, 1, 5).merge();
+    
+    // Get last 30 days of transactions
+    const lastRow = transactionsSheet.getLastRow();
+    if (lastRow <= 1) {
+      dashboardSheet.getRange(3, 1).setValue('No transaction data available');
+      return;
+    }
+    
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+    
+    const txData = transactionsSheet.getRange(2, 1, lastRow - 1, 5).getValues();
+    
+    // Get category mappings from Categories sheet
+    const categoryMappings = {};
+    if (categoriesSheet.getLastRow() > 1) {
+      const catData = categoriesSheet.getRange(2, 1, categoriesSheet.getLastRow() - 1, 2).getValues();
+      catData.forEach(row => {
+        const keyword = _normalize(row[0]).toLowerCase();
+        const category = _normalize(row[1]);
+        if (keyword && category) categoryMappings[keyword] = category;
+      });
+    }
+    
+    // Process transactions to extract category data
+    const categoryData = {};
+    const manualCategories = new Set();
+    let totalExpense = 0;
+    let totalIncome = 0;
+    let filteredTransactions = 0;
+    
+    // Process each transaction
+    txData.forEach(row => {
+      const date = new Date(row[COLUMNS.TRANSACTIONS.DATE - 1]);
+      const amount = parseFloat(row[COLUMNS.TRANSACTIONS.AMOUNT - 1] || 0);
+      const merchant = _normalize(row[COLUMNS.TRANSACTIONS.TO - 1]);
+      let category = _normalize(row[COLUMNS.TRANSACTIONS.CATEGORY - 1]);
+      
+      // Skip transactions outside time range or with invalid amounts
+      if (date < thirtyDaysAgo || isNaN(amount) || amount === 0) return;
+      
+      filteredTransactions++;
+      
+      // Track income/expense totals
+      if (amount > 0) {
+        totalIncome += amount;
+      } else {
+        totalExpense += Math.abs(amount);
+      }
+      
+      // Only process expenses for the pie chart
+      if (amount >= 0) return;
+      
+      // If no category is assigned, try to find one based on merchant
+      if (!category || category === 'Uncategorized' || category === 'Unknown') {
+        if (merchant) {
+          // Look for keyword matches in the merchant name
+          const merchantLower = merchant.toLowerCase();
+          let bestMatch = '';
+          
+          Object.keys(categoryMappings).forEach(keyword => {
+            if (merchantLower.includes(keyword) && keyword.length > bestMatch.length) {
+              bestMatch = keyword;
+              category = categoryMappings[keyword];
+            }
+          });
+        }
+        
+        // If still no category, use "Uncategorized"
+        if (!category) category = 'Uncategorized';
+      } else {
+        // Track manual categories to ensure they're included in the Categories sheet
+        manualCategories.add(category);
+      }
+      
+      // Add to category data
+      if (!categoryData[category]) categoryData[category] = { amount: 0, count: 0 };
+      categoryData[category].amount += Math.abs(amount);
+      categoryData[category].count++;
+    });
+    
+    // Sort categories by amount
+    const sortedCategories = Object.keys(categoryData)
+      .sort((a, b) => categoryData[b].amount - categoryData[a].amount);
+    
+    // Create summary section
+    dashboardSheet.getRange(3, 1).setValue('30-Day Summary');
+    dashboardSheet.getRange(3, 1).setFontWeight('bold');
+    
+    dashboardSheet.getRange(4, 1).setValue('Total Income:');
+    dashboardSheet.getRange(4, 2).setValue(totalIncome).setNumberFormat('$#,##0.00');
+    
+    dashboardSheet.getRange(5, 1).setValue('Total Expenses:');
+    dashboardSheet.getRange(5, 2).setValue(totalExpense).setNumberFormat('$#,##0.00');
+    
+    dashboardSheet.getRange(6, 1).setValue('Net Cash Flow:');
+    dashboardSheet.getRange(6, 2).setValue(totalIncome - totalExpense).setNumberFormat('$#,##0.00');
+    
+    dashboardSheet.getRange(7, 1).setValue('Transactions:');
+    dashboardSheet.getRange(7, 2).setValue(filteredTransactions);
+    
+    // Create data for pie chart
+    dashboardSheet.getRange(9, 1).setValue('Expense Categories');
+    dashboardSheet.getRange(9, 1).setFontWeight('bold');
+    
+    dashboardSheet.getRange(10, 1).setValue('Category');
+    dashboardSheet.getRange(10, 2).setValue('Amount');
+    dashboardSheet.getRange(10, 3).setValue('Percentage');
+    dashboardSheet.getRange(10, 4).setValue('Count');
+    
+    dashboardSheet.getRange(10, 1, 1, 4).setFontWeight('bold').setBackground('#f0f0f0');
+    
+    // Populate category data
+    sortedCategories.forEach((category, index) => {
+      const row = 11 + index;
+      const amount = categoryData[category].amount;
+      const percentage = totalExpense > 0 ? amount / totalExpense : 0;
+      
+      dashboardSheet.getRange(row, 1).setValue(category);
+      dashboardSheet.getRange(row, 2).setValue(amount).setNumberFormat('$#,##0.00');
+      dashboardSheet.getRange(row, 3).setValue(percentage).setNumberFormat('0.0%');
+      dashboardSheet.getRange(row, 4).setValue(categoryData[category].count);
+    });
+    
+    // Create pie chart
+    if (sortedCategories.length > 0) {
+      const dataRange = dashboardSheet.getRange(10, 1, sortedCategories.length + 1, 2);
+      
+      const chart = dashboardSheet.newChart()
+        .setChartType(Charts.ChartType.PIE)
+        .addRange(dataRange)
+        .setPosition(3, 5, 0, 0)
+        .setOption('title', 'Expense Categories')
+        .setOption('pieSliceText', 'percentage')
+        .setOption('legend', { position: 'right' })
+        .setOption('width', 500)
+        .setOption('height', 300)
+        .build();
+      
+      dashboardSheet.insertChart(chart);
+    }
+    
+    // Add manually entered categories to Categories sheet if not already present
+    if (manualCategories.size > 0) {
+      const existingCategories = new Set(Object.values(categoryMappings));
+      let newCategoriesAdded = 0;
+      
+      manualCategories.forEach(category => {
+        if (!existingCategories.has(category)) {
+          // Add the category as both keyword and category value
+          categoriesSheet.appendRow([category.toLowerCase(), category]);
+          newCategoriesAdded++;
+        }
+      });
+      
+      if (newCategoriesAdded > 0) {
+        _logInfo(`Added ${newCategoriesAdded} manual categories to Categories sheet`);
+      }
+    }
+    
+    // Add last update timestamp
+    dashboardSheet.getRange(sortedCategories.length + 12, 1).setValue('Last Updated:');
+    dashboardSheet.getRange(sortedCategories.length + 12, 2).setValue(new Date());
+    
+    _logInfo('Dashboard built successfully', {
+      categories: sortedCategories.length,
+      transactions: filteredTransactions,
+      income: totalIncome,
+      expenses: totalExpense
+    });
+    
   } catch (error) {
-    _logError('Failed to build dashboard (stub)', error);
+    _logError('Failed to build dashboard', error);
+    try { SpreadsheetApp.getUi().alert('Dashboard build failed: ' + error.message); } catch (e) {}
   }
 }
 
@@ -2355,8 +2804,8 @@ function deleteScheduledTriggers() {
 
 // ===================== SCRIPT METADATA & VERSION INFO =====================
 
-const SCRIPT_VERSION = '6.0.0';
-const SCRIPT_BUILD_DATE = '2024-08-19';
+const SCRIPT_VERSION = '8.0.0';
+const SCRIPT_BUILD_DATE = '2025-08-20';
 const SCRIPT_FEATURES = [
   'Robust Email Parsing (CIBC, PC Financial, Interac, Wealthsimple)',
   'Advanced Staging/Pairing System with Configurable Windows',
@@ -2370,7 +2819,11 @@ const SCRIPT_FEATURES = [
   'Comprehensive Audit Logging',
   'Error Recovery and Emergency Functions',
   'Performance Optimization Tools',
-  'Security and Access Control Features'
+  'Security and Access Control Features',
+  'Improved Cryptocurrency Price Fetching (High Precision)',
+  'Enhanced Category Recognition from Manual Entries',
+  'Better Transfer Recipient Detection',
+  'Pending Transaction Review System'
 ];
 
 function showAbout() {
