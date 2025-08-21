@@ -362,7 +362,7 @@ function _setupInitialSheets(ss) {
         'Finance Dashboard - Auto-Generated'
       ],
       [SHEET_NAMES.NET_WORTH]: [
-        'Date', 'Total Assets', 'Total Liabilities', 'Net Worth', 'Notes'
+        'Date', 'Net Worth'
       ],
       [SHEET_NAMES.CSV_IMPORT]: [
         'Import Date', 'Source File', 'Records Imported', 'Status', 'Notes'
@@ -1719,7 +1719,7 @@ function _refreshHoldingsData() {
       return;
     }
     
-    const data = holdingsSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const data = holdingsSheet.getRange(2,  1, lastRow - 1, lastCol).getValues();
     let updatedCount = 0;
     
     for (let i = 0; i < data.length; i++) {
@@ -2195,32 +2195,54 @@ function _writeDashboardSummary(dashboardSheet, summary) {
 
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  ui.createMenu('💰 Finance Automation V10')
-    .addItem('🔄 Process New Emails', 'processNewEmails')
-    .addSeparator()
-    .addItem('🔗 Pair Staged Transfers', 'pairStagedTransfers')
+  const menu = ui.createMenu('Finance Automation');
+
+  menu.addItem('🚀 Run Full Automation', 'runFullAutomation');
+  menu.addSeparator();
+
+  const manualUpdatesMenu = ui.createMenu('Manual Updates')
+    .addItem('🔄 Refresh Holdings', 'refreshHoldings')
+    .addItem('📊 Update Dashboard', 'updateDashboard')
+    .addItem('📈 Update Net Worth', 'updateNetWorth');
+  menu.addSubMenu(manualUpdatesMenu);
+
+  const transactionToolsMenu = ui.createMenu('Transaction Tools')
+    .addItem('📧 Process New Emails', 'processNewEmails')
+    .addItem('🤝 Pair Staged Transfers', 'pairStagedTransfers')
     .addItem('🧹 Cleanup Stale Transactions', 'cleanupStaleTransactions')
-    .addSeparator()
-    .addItem('📊 Refresh Holdings Prices', 'refreshHoldingsData')
-    .addItem('🏦 Initialize Current Holdings', 'initializeHoldingsData')
-    .addItem('📈 Update Dashboard', 'updateDashboard')
-    .addSeparator()
-    .addItem('🔧 Run Full Automation', 'runFullAutomation')
-    .addItem('⚡ Quick Setup', 'quickSetup')
-    .addSeparator()
-    .addItem('🏷️ Learn Categories', 'learnCategories')
-    .addItem('� Review Pending Transactions', 'reviewPendingTransactions')
-    .addSeparator()
-    .addItem('�📋 Show Configuration', 'showConfiguration')
-    .addItem('🧪 Test Email Parsing', 'testEmailParsing')
-    .addItem('💰 Test SHIB Price', 'testShibPriceFetch')
-    .addItem('🔍 Test All Prices', 'testAllCryptoPrices')
-    .addItem('🌐 Test Crypto APIs', 'testCryptoApiCalls')
-    .addItem('📈 Test Yahoo Crypto', 'testYahooFinanceCrypto')
-    .addToUi();
+    .addItem('🔍 Review Pending', 'reviewPendingTransactions')
+    .addItem('📚 Learn Categories', 'learnCategoriesFromTransactions');
+  menu.addSubMenu(transactionToolsMenu);
+  
+  menu.addSeparator();
+
+  const debugMenu = ui.createMenu('Debug & Testing')
+    .addItem('📋 Show Configuration', 'showConfiguration')
+    .addItem('🧪 Test Email Parsing', 'testEmailParsing');
+  menu.addSubMenu(debugMenu);
+
+  menu.addToUi();
 }
 
-// ===================== MAIN ORCHESTRATION FUNCTIONS =====================
+// ===================== PUBLIC WRAPPER FUNCTIONS =====================
+
+function refreshHoldings() {
+  _refreshHoldingsData();
+}
+
+function processNewEmails() {
+  _processNewEmails();
+}
+
+function pairStagedTransfers() {
+  _pairStagedTransfers();
+}
+
+function cleanupStaleTransactions() {
+  _cleanupStaleTransactions();
+}
+
+// ===================== FULL AUTOMATION RUNNER =====================
 
 function runFullAutomation() {
   try {
@@ -2482,7 +2504,7 @@ function cleanupStaleTransactions() {
   return _cleanupStaleTransactions();
 }
 
-function refreshHoldingsData() {
+function refreshHoldings() {
   return _refreshHoldingsData();
 }
 
