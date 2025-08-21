@@ -1,0 +1,19 @@
+{
+  "name": "budgetting-code-analyzer",
+  "version": "1.0.0",
+  "description": "Excel data analyzer for finance automation",
+  "main": "excel-analyzer.js",
+  "scripts": {
+    "analyze": "node excel-analyzer.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5",
+    "csv-parser": "^3.0.0",
+    "fs-extra": "^11.1.1"
+  },
+  "devDependencies": {},
+  "keywords": ["excel", "finance", "automation", "analysis"],
+  "author": "",
+  "license": "MIT"
+}
