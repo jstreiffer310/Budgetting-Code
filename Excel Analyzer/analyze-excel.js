@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const ExcelAnalyzer = require('./excel-analyzer');
+const ExcelAnalyzer = require('../excel-analyzer');
 const fs = require('fs');
 const path = require('path');
 

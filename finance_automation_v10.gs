@@ -145,27 +145,864 @@ const CANADIAN_TICKERS = new Set([
   'VCE.TO', 'XEQT.TO', 'TDB902', 'TDB900', 'VEQT.TO', 'VGRO.TO'
 ]);
 
-// CSV Import profiles
-const CSV_PROFILES = [
-  {
-    name: 'CIBC Aventura Card',
-    identifyingKeyword: '4500********6271',
-    accountName: 'CIBC Aventura',
-    columnMap: { date: 1, description: 2, debit: 3, credit: 4 }
-  },
-  {
-    name: 'CIBC Dividend Card',
-    identifyingKeyword: '4505********2866',
-    accountName: 'CIBC Dividend',
-    columnMap: { date: 1, description: 2, debit: 3, credit: 4 }
-  },
-  {
-    name: 'PC Financial Cash Account',
-    identifyingKeyword: 'Card Holder Name',
-    accountName: 'PC Financial',
-    columnMap: { date: 4, description: 1, amount: 6 }
+// ===================== ENHANCED IMPORT SYSTEM =====================
+
+/**
+ * Enhanced CSV and PDF Import profiles with robust date handling
+ */
+const IMPORT_PROFILES = {
+  CSV: [
+    {
+      name: 'CIBC Aventura Card',
+      identifyingKeyword: '4500********6271',
+      accountName: 'CIBC Aventura',
+      columnMap: { date: 1, description: 2, debit: 3, credit: 4 },
+      dateFormat: 'MM/DD/YYYY',
+      encoding: 'UTF-8'
+    },
+    {
+      name: 'CIBC Dividend Card', 
+      identifyingKeyword: '4505********2866',
+      accountName: 'CIBC Dividend',
+      columnMap: { date: 1, description: 2, debit: 3, credit: 4 },
+      dateFormat: 'MM/DD/YYYY',
+      encoding: 'UTF-8'
+    },
+    {
+      name: 'PC Financial Cash Account',
+      identifyingKeyword: 'Card Holder Name',
+      accountName: 'PC Financial', 
+      columnMap: { date: 4, description: 1, amount: 6 },
+      dateFormat: 'YYYY-MM-DD',
+      encoding: 'UTF-8'
+    },
+    {
+      name: 'Generic Bank CSV',
+      identifyingKeyword: 'Transaction Date',
+      accountName: 'Bank Account',
+      columnMap: { date: 0, description: 1, amount: 2 },
+      dateFormat: 'YYYY-MM-DD',
+      encoding: 'UTF-8'
+    }
+  ],
+  PDF: [
+    {
+      name: 'CIBC Statement',
+      patterns: {
+        transaction: /(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s*(CR|DR)?/g,
+        balance: /Balance.*?([\d,]+\.\d{2})/i,
+        accountNumber: /Account.*?(\d{4})/i,
+        statementPeriod: /Statement Period.*?(\d{2}\/\d{2}\/\d{4})\s*to\s*(\d{2}\/\d{2}\/\d{4})/i
+      },
+      dateFormat: 'MM/DD/YYYY',
+      accountType: 'Credit Card'
+    },
+    {
+      name: 'PC Financial Statement',
+      patterns: {
+        transaction: /(\d{4}-\d{2}-\d{2})\s+(.+?)\s+([\d,]+\.\d{2})/g,
+        balance: /Current Balance.*?([\d,]+\.\d{2})/i,
+        accountNumber: /Account.*?(\d{4})/i
+      },
+      dateFormat: 'YYYY-MM-DD',
+      accountType: 'Bank Account'
+    },
+    {
+      name: 'Generic Bank Statement',
+      patterns: {
+        transaction: /(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\s+(.+?)\s+([\d,]+\.\d{2})/g,
+        balance: /Balance.*?([\d,]+\.\d{2})/i
+      },
+      dateFormat: 'AUTO_DETECT',
+      accountType: 'Bank Account'
+    }
+  ]
+};
+
+/**
+ * Date parsing with 1969 fix and robust format detection
+ */
+function _parseStatementDate(dateString, expectedFormat = 'AUTO_DETECT') {
+  if (!dateString || dateString.trim() === '') {
+    return null;
   }
-];
+
+  // Clean the date string
+  let cleanDate = dateString.toString().trim();
+  
+  // Fix common issues that cause 1969 dates
+  if (cleanDate.includes('/')) {
+    // Handle MM/DD/YY vs MM/DD/YYYY
+    const parts = cleanDate.split('/');
+    if (parts.length === 3) {
+      let [month, day, year] = parts;
+      
+      // Fix 2-digit years (common cause of 1969 issue)
+      if (year.length === 2) {
+        const currentYear = new Date().getFullYear();
+        const currentCentury = Math.floor(currentYear / 100) * 100;
+        const yearNum = parseInt(year);
+        
+        // Assume years 00-30 are 2000s, 31-99 are 1900s
+        if (yearNum <= 30) {
+          year = (currentCentury + yearNum).toString();
+        } else {
+          year = (currentCentury - 100 + yearNum).toString();
+        }
+      }
+      cleanDate = `${month}/${day}/${year}`;
+    }
+  }
+
+  // Try multiple date formats
+  const formats = [
+    'MM/DD/YYYY', 'MM/DD/YY', 'M/D/YYYY', 'M/D/YY',
+    'YYYY-MM-DD', 'DD/MM/YYYY', 'DD-MM-YYYY',
+    'MMM DD, YYYY', 'DD MMM YYYY'
+  ];
+
+  for (const format of formats) {
+    try {
+      const date = _parseSpecificDateFormat(cleanDate, format);
+      if (date && date.getFullYear() > 1990 && date.getFullYear() <= new Date().getFullYear() + 1) {
+        return date;
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+
+  // Fallback to JavaScript Date parsing with validation
+  try {
+    const date = new Date(cleanDate);
+    if (!isNaN(date.getTime()) && date.getFullYear() > 1990) {
+      return date;
+    }
+  } catch (e) {
+    // Continue to null return
+  }
+
+  _logError(`Failed to parse date: ${dateString}`, { cleanDate, expectedFormat });
+  return null;
+}
+
+/**
+ * Parse specific date format
+ */
+function _parseSpecificDateFormat(dateString, format) {
+  const cleanDate = dateString.trim();
+  
+  switch (format) {
+    case 'MM/DD/YYYY':
+    case 'MM/DD/YY':
+      const mmddParts = cleanDate.split('/');
+      if (mmddParts.length === 3) {
+        return new Date(mmddParts[2], mmddParts[0] - 1, mmddParts[1]);
+      }
+      break;
+      
+    case 'YYYY-MM-DD':
+      const yyyyParts = cleanDate.split('-');
+      if (yyyyParts.length === 3) {
+        return new Date(yyyyParts[0], yyyyParts[1] - 1, yyyyParts[2]);
+      }
+      break;
+      
+    case 'DD/MM/YYYY':
+      const ddmmParts = cleanDate.split('/');
+      if (ddmmParts.length === 3) {
+        return new Date(ddmmParts[2], ddmmParts[1] - 1, ddmmParts[0]);
+      }
+      break;
+  }
+  
+  return null;
+}
+
+/**
+ * Enhanced PDF statement processing with vendor learning
+ */
+function processPDFStatement(pdfBlob, accountName = 'Unknown Account') {
+  try {
+    const pdfText = _extractTextFromPDF(pdfBlob);
+    if (!pdfText) {
+      throw new Error('Failed to extract text from PDF');
+    }
+
+    // Detect statement type
+    const profile = _detectPDFProfile(pdfText);
+    if (!profile) {
+      throw new Error('Unable to detect statement format');
+    }
+
+    _logInfo(`Processing PDF statement using profile: ${profile.name}`);
+
+    // Extract transactions
+    const transactions = _extractPDFTransactions(pdfText, profile);
+    const trainingData = _extractTrainingData(pdfText, profile);
+
+    // Sort transactions by date (most recent first)
+    transactions.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+    // Import transactions
+    let imported = 0;
+    let failed = 0;
+
+    for (const transaction of transactions) {
+      try {
+        _addTransactionToSheet(transaction, accountName);
+        imported++;
+        
+        // Learn from vendor patterns
+        if (trainingData.vendors && trainingData.vendors.length > 0) {
+          _learnFromVendorData(transaction.description, trainingData.vendors);
+        }
+        
+      } catch (error) {
+        _logError(`Failed to import transaction: ${transaction.description}`, error);
+        failed++;
+      }
+    }
+
+    // Learn from account information
+    if (trainingData.accountInfo) {
+      _updateAccountLearning(accountName, trainingData.accountInfo);
+    }
+
+    // Sort the transactions sheet to maintain chronological order
+    _sortTransactionsByDate();
+
+    _logInfo(`PDF import complete: ${imported} imported, ${failed} failed`);
+    
+    return {
+      success: true,
+      imported,
+      failed,
+      profile: profile.name,
+      trainingData: trainingData
+    };
+
+  } catch (error) {
+    _logError('PDF processing failed', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Extract text from PDF using Google Apps Script
+ */
+function _extractTextFromPDF(pdfBlob) {
+  try {
+    // Convert PDF to Google Doc temporarily
+    const tempDoc = DriveApp.createFile(pdfBlob).getAs('application/pdf');
+    const docBlob = DriveApp.getFileById(tempDoc.getId()).getBlob();
+    
+    // Use OCR to extract text
+    const ocrResult = Drive.Files.insert({
+      title: 'temp_ocr_file',
+      mimeType: 'application/vnd.google-apps.document'
+    }, docBlob, {
+      ocr: true
+    });
+
+    const doc = DocumentApp.openById(ocrResult.id);
+    const text = doc.getBody().getText();
+    
+    // Clean up temporary files
+    DriveApp.getFileById(ocrResult.id).setTrashed(true);
+    DriveApp.getFileById(tempDoc.getId()).setTrashed(true);
+    
+    return text;
+    
+  } catch (error) {
+    _logError('PDF text extraction failed', error);
+    return null;
+  }
+}
+
+/**
+ * Detect PDF statement profile
+ */
+function _detectPDFProfile(pdfText) {
+  const profiles = IMPORT_PROFILES.PDF;
+  
+  for (const profile of profiles) {
+    // Check for identifying patterns
+    if (pdfText.toLowerCase().includes(profile.name.toLowerCase().split(' ')[0])) {
+      return profile;
+    }
+    
+    // Check for account number patterns
+    if (profile.patterns.accountNumber && profile.patterns.accountNumber.test(pdfText)) {
+      return profile;
+    }
+  }
+  
+  // Return generic profile as fallback
+  return profiles.find(p => p.name === 'Generic Bank Statement');
+}
+
+/**
+ * Extract transactions from PDF text
+ */
+function _extractPDFTransactions(pdfText, profile) {
+  const transactions = [];
+  const transactionPattern = profile.patterns.transaction;
+  
+  let match;
+  while ((match = transactionPattern.exec(pdfText)) !== null) {
+    const [fullMatch, dateStr, description, amountStr, indicator] = match;
+    
+    const date = _parseStatementDate(dateStr, profile.dateFormat);
+    if (!date) continue;
+    
+    const amount = parseFloat(amountStr.replace(/,/g, ''));
+    const isDebit = indicator === 'DR' || (!indicator && amount < 0);
+    
+    transactions.push({
+      date: date,
+      description: description.trim(),
+      amount: isDebit ? -Math.abs(amount) : Math.abs(amount),
+      category: 'Uncategorized',
+      account: profile.accountType,
+      source: 'PDF Import'
+    });
+  }
+  
+  return transactions;
+}
+
+/**
+ * Extract training data from PDF
+ */
+function _extractTrainingData(pdfText, profile) {
+  const trainingData = {
+    vendors: [],
+    categories: [],
+    accountInfo: {}
+  };
+
+  // Extract vendor information from transaction descriptions
+  const vendors = _extractVendorPatterns(pdfText);
+  trainingData.vendors = vendors;
+
+  // Extract account information
+  if (profile.patterns.accountNumber) {
+    const accountMatch = profile.patterns.accountNumber.exec(pdfText);
+    if (accountMatch) {
+      trainingData.accountInfo.accountNumber = accountMatch[1];
+    }
+  }
+
+  if (profile.patterns.statementPeriod) {
+    const periodMatch = profile.patterns.statementPeriod.exec(pdfText);
+    if (periodMatch) {
+      trainingData.accountInfo.statementPeriod = {
+        start: periodMatch[1],
+        end: periodMatch[2]
+      };
+    }
+  }
+
+  return trainingData;
+}
+
+/**
+ * Extract vendor patterns for learning
+ */
+function _extractVendorPatterns(pdfText) {
+  const vendors = [];
+  const lines = pdfText.split('\n');
+  
+  // Common vendor patterns
+  const vendorPatterns = [
+    /^([A-Z][A-Z\s&]+)\s+\d{2}\/\d{2}/,  // ALL CAPS vendor names
+    /^(.+?)\s+\$[\d,]+\.\d{2}/,           // Description before amount
+    /(\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:INC|LLC|CORP|LTD)/i, // Corporate suffixes
+    /^(.*?)\s+(?:PURCHASE|PAYMENT|WITHDRAWAL)/i  // Transaction types
+  ];
+  
+  for (const line of lines) {
+    for (const pattern of vendorPatterns) {
+      const match = pattern.exec(line.trim());
+      if (match && match[1]) {
+        const vendor = match[1].trim();
+        if (vendor.length > 3 && vendor.length < 50) {
+          vendors.push(vendor);
+        }
+      }
+    }
+  }
+  
+  return [...new Set(vendors)]; // Remove duplicates
+}
+
+/**
+ * Learn from vendor data for improved categorization
+ */
+function _learnFromVendorData(description, vendors) {
+  for (const vendor of vendors) {
+    if (description.toLowerCase().includes(vendor.toLowerCase())) {
+      // This vendor appears in this transaction
+      const category = _predictCategoryFromVendor(vendor);
+      if (category && category !== 'Uncategorized') {
+        _recordLearning(description, category, 'vendor_pattern', 0.7);
+      }
+    }
+  }
+}
+
+/**
+ * Predict category from vendor name
+ */
+function _predictCategoryFromVendor(vendor) {
+  const vendorLower = vendor.toLowerCase();
+  
+  // Common vendor categories
+  const categoryPatterns = {
+    'Groceries': ['walmart', 'superstore', 'sobeys', 'metro', 'loblaws', 'food', 'grocery'],
+    'Gas': ['shell', 'esso', 'petro', 'gas', 'fuel', 'station'],
+    'Restaurants': ['restaurant', 'cafe', 'pizza', 'burger', 'mcdonalds', 'tim hortons'],
+    'Shopping': ['amazon', 'bestbuy', 'canadian tire', 'home depot', 'costco'],
+    'Utilities': ['hydro', 'electric', 'gas company', 'water', 'internet', 'phone'],
+    'Transportation': ['uber', 'taxi', 'ttc', 'go transit', 'parking']
+  };
+  
+  for (const [category, keywords] of Object.entries(categoryPatterns)) {
+    if (keywords.some(keyword => vendorLower.includes(keyword))) {
+      return category;
+    }
+  }
+  
+  return 'Uncategorized';
+}
+
+/**
+ * Update account learning data
+ */
+function _updateAccountLearning(accountName, accountInfo) {
+  try {
+    const learningSheet = _getOrCreateSheet('Learning_Hub');
+    const data = learningSheet.getDataRange().getValues();
+    
+    // Find or create account learning record
+    let accountRow = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === 'account_info' && data[i][1] === accountName) {
+        accountRow = i + 1;
+        break;
+      }
+    }
+    
+    const learningData = {
+      type: 'account_info',
+      pattern: accountName,
+      metadata: JSON.stringify(accountInfo),
+      timestamp: new Date(),
+      confidence: 1.0,
+      source: 'PDF Import'
+    };
+    
+    if (accountRow > 0) {
+      // Update existing record
+      learningSheet.getRange(accountRow, 1, 1, 6).setValues([[
+        learningData.type, learningData.pattern, '', '', learningData.metadata, learningData.timestamp
+      ]]);
+    } else {
+      // Add new record
+      learningSheet.appendRow([
+        learningData.type, learningData.pattern, '', '', learningData.metadata, learningData.timestamp
+      ]);
+    }
+    
+  } catch (error) {
+    _logError('Failed to update account learning', error);
+  }
+}
+
+/**
+ * Enhanced CSV import with 1969 date fix and robust processing
+ */
+function processCSVStatement(csvData, accountName = 'Unknown Account') {
+  try {
+    // Detect CSV profile
+    const profile = _detectCSVProfile(csvData);
+    if (!profile) {
+      throw new Error('Unable to detect CSV format');
+    }
+
+    _logInfo(`Processing CSV using profile: ${profile.name}`);
+
+    // Parse CSV data
+    const transactions = _parseCSVTransactions(csvData, profile);
+    const trainingData = _extractCSVTrainingData(csvData, profile);
+
+    // Sort transactions by date (most recent first)
+    transactions.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+    // Import transactions
+    let imported = 0;
+    let failed = 0;
+
+    for (const transaction of transactions) {
+      try {
+        _addTransactionToSheet(transaction, accountName || profile.accountName);
+        imported++;
+        
+        // Learn from transaction patterns
+        if (transaction.description) {
+          const predictedCategory = _predictCategoryFromDescription(transaction.description);
+          if (predictedCategory !== 'Uncategorized') {
+            _recordLearning(transaction.description, predictedCategory, 'csv_import', 0.6);
+          }
+        }
+        
+      } catch (error) {
+        _logError(`Failed to import CSV transaction: ${transaction.description}`, error);
+        failed++;
+      }
+    }
+
+    // Sort the transactions sheet to maintain chronological order
+    _sortTransactionsByDate();
+
+    _logInfo(`CSV import complete: ${imported} imported, ${failed} failed`);
+    
+    return {
+      success: true,
+      imported,
+      failed,
+      profile: profile.name,
+      trainingData: trainingData
+    };
+
+  } catch (error) {
+    _logError('CSV processing failed', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Detect CSV profile from data
+ */
+function _detectCSVProfile(csvData) {
+  const lines = csvData.split('\n');
+  const headerLine = lines[0];
+  
+  const profiles = IMPORT_PROFILES.CSV;
+  
+  for (const profile of profiles) {
+    if (headerLine.toLowerCase().includes(profile.identifyingKeyword.toLowerCase())) {
+      return profile;
+    }
+  }
+  
+  // Try to auto-detect based on common patterns
+  return _autoDetectCSVProfile(headerLine);
+}
+
+/**
+ * Auto-detect CSV profile from header
+ */
+function _autoDetectCSVProfile(headerLine) {
+  const headers = headerLine.toLowerCase().split(',').map(h => h.trim());
+  
+  // Create dynamic profile based on header analysis
+  const profile = {
+    name: 'Auto-Detected CSV',
+    identifyingKeyword: 'auto',
+    accountName: 'CSV Import',
+    columnMap: {},
+    dateFormat: 'AUTO_DETECT',
+    encoding: 'UTF-8'
+  };
+  
+  // Map common column names
+  headers.forEach((header, index) => {
+    if (header.includes('date') || header.includes('transaction')) {
+      profile.columnMap.date = index;
+    } else if (header.includes('description') || header.includes('memo') || header.includes('payee')) {
+      profile.columnMap.description = index;
+    } else if (header.includes('amount') && !header.includes('balance')) {
+      profile.columnMap.amount = index;
+    } else if (header.includes('debit') || header.includes('withdrawal')) {
+      profile.columnMap.debit = index;
+    } else if (header.includes('credit') || header.includes('deposit')) {
+      profile.columnMap.credit = index;
+    }
+  });
+  
+  return profile;
+}
+
+/**
+ * Parse CSV transactions with robust date handling
+ */
+function _parseCSVTransactions(csvData, profile) {
+  const transactions = [];
+  const lines = csvData.split('\n');
+  
+  // Skip header row
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    
+    try {
+      const columns = _parseCSVLine(line);
+      const transaction = _parseCSVTransaction(columns, profile);
+      
+      if (transaction && transaction.date) {
+        // Validate date is not 1969 (common CSV parsing error)
+        if (transaction.date.getFullYear() >= 1990) {
+          transactions.push(transaction);
+        } else {
+          _logError(`Skipped transaction with invalid date: ${transaction.date}`, { line, profile: profile.name });
+        }
+      }
+      
+    } catch (error) {
+      _logError(`Failed to parse CSV line: ${line}`, error);
+    }
+  }
+  
+  return transactions;
+}
+
+/**
+ * Parse CSV line handling quotes and commas
+ */
+function _parseCSVLine(line) {
+  const columns = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      columns.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  
+  // Add final column
+  columns.push(current.trim());
+  
+  return columns;
+}
+
+/**
+ * Parse individual CSV transaction
+ */
+function _parseCSVTransaction(columns, profile) {
+  const map = profile.columnMap;
+  
+  // Extract date with enhanced parsing
+  const dateStr = columns[map.date];
+  const date = _parseStatementDate(dateStr, profile.dateFormat);
+  
+  if (!date) {
+    _logError(`Failed to parse date: ${dateStr}`);
+    return null;
+  }
+  
+  // Extract description
+  const description = (columns[map.description] || '').replace(/"/g, '').trim();
+  if (!description) {
+    return null;
+  }
+  
+  // Extract amount
+  let amount = 0;
+  
+  if (map.amount !== undefined) {
+    // Single amount column
+    const amountStr = (columns[map.amount] || '').replace(/[$,]/g, '');
+    amount = parseFloat(amountStr) || 0;
+  } else if (map.debit !== undefined && map.credit !== undefined) {
+    // Separate debit/credit columns
+    const debitStr = (columns[map.debit] || '').replace(/[$,]/g, '');
+    const creditStr = (columns[map.credit] || '').replace(/[$,]/g, '');
+    
+    const debit = parseFloat(debitStr) || 0;
+    const credit = parseFloat(creditStr) || 0;
+    
+    amount = credit - debit;
+  }
+  
+  return {
+    date: date,
+    description: description,
+    amount: amount,
+    category: 'Uncategorized',
+    account: profile.accountName,
+    source: 'CSV Import'
+  };
+}
+
+/**
+ * Extract training data from CSV
+ */
+function _extractCSVTrainingData(csvData, profile) {
+  const trainingData = {
+    vendors: [],
+    patterns: [],
+    accountInfo: {
+      profile: profile.name,
+      columnMapping: profile.columnMap,
+      dateFormat: profile.dateFormat
+    }
+  };
+  
+  // Extract vendor patterns from descriptions
+  const lines = csvData.split('\n');
+  const vendors = new Set();
+  
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    
+    try {
+      const columns = _parseCSVLine(line);
+      const description = columns[profile.columnMap.description] || '';
+      
+      // Extract potential vendor names
+      const vendorMatches = description.match(/\b[A-Z][A-Z\s&]+\b/g);
+      if (vendorMatches) {
+        vendorMatches.forEach(vendor => {
+          if (vendor.length > 3 && vendor.length < 50) {
+            vendors.add(vendor.trim());
+          }
+        });
+      }
+      
+    } catch (error) {
+      continue;
+    }
+  }
+  
+  trainingData.vendors = Array.from(vendors);
+  return trainingData;
+}
+
+/**
+ * File upload handler for CSV/PDF processing
+ */
+function handleFileUpload(fileBlob, fileName, accountName) {
+  try {
+    const fileExtension = fileName.toLowerCase().split('.').pop();
+    
+    if (fileExtension === 'csv') {
+      const csvData = fileBlob.getDataAsString();
+      return processCSVStatement(csvData, accountName);
+    } else if (fileExtension === 'pdf') {
+      return processPDFStatement(fileBlob, accountName);
+    } else {
+      throw new Error(`Unsupported file type: ${fileExtension}`);
+    }
+    
+  } catch (error) {
+    _logError('File upload processing failed', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Batch import function for multiple files
+ */
+function batchImportFiles(files, defaultAccount = 'Imported Account') {
+  const results = {
+    totalFiles: files.length,
+    successful: 0,
+    failed: 0,
+    totalTransactions: 0,
+    errors: []
+  };
+  
+  for (const file of files) {
+    try {
+      const result = handleFileUpload(file.blob, file.name, file.account || defaultAccount);
+      
+      if (result.success) {
+        results.successful++;
+        results.totalTransactions += result.imported;
+      } else {
+        results.failed++;
+        results.errors.push({ file: file.name, error: result.error });
+      }
+      
+    } catch (error) {
+      results.failed++;
+      results.errors.push({ file: file.name, error: error.message });
+    }
+  }
+  
+  _logInfo(`Batch import complete: ${results.successful}/${results.totalFiles} files successful, ${results.totalTransactions} transactions imported`);
+  
+  return results;
+}
+
+/**
+ * UI function to test and demonstrate import capabilities
+ */
+function testImportSystem() {
+  const dashboard = _getOrCreateSheet('Dashboard');
+  const now = new Date();
+  
+  // Add import status section to dashboard
+  const importSection = [
+    ['Import System Status', now.toISOString()],
+    [''],
+    ['Supported Formats:', ''],
+    ['CSV Files', 'CIBC, PC Financial, Generic'],
+    ['PDF Statements', 'CIBC, PC Financial, Generic'],
+    [''],
+    ['Recent Import Stats:', ''],
+    ['Last Import', 'Use processCSVStatement() or processPDFStatement()'],
+    ['Training Data Extracted', 'Vendor patterns and categories'],
+    ['Date Parsing', 'Fixed 1969 date issues'],
+    [''],
+    ['Usage Examples:', ''],
+    ['CSV Import', '=processCSVStatement(csvData, "Account Name")'],
+    ['PDF Import', '=processPDFStatement(pdfBlob, "Account Name")'],
+    ['Batch Import', '=batchImportFiles(fileArray, "Default Account")']
+  ];
+  
+  // Find a good location in dashboard (after existing content)
+  const lastRow = dashboard.getLastRow();
+  const startRow = lastRow + 3;
+  
+  dashboard.getRange(startRow, 1, importSection.length, 2).setValues(importSection);
+  
+  // Format the section
+  dashboard.getRange(startRow, 1, 1, 2).setFontWeight('bold').setBackground('#e1f5fe');
+  dashboard.getRange(startRow + 2, 1, 1, 2).setFontWeight('bold');
+  dashboard.getRange(startRow + 6, 1, 1, 2).setFontWeight('bold');
+  dashboard.getRange(startRow + 10, 1, 1, 2).setFontWeight('bold');
+  
+  _logInfo('Import system status added to Dashboard');
+  
+  return {
+    status: 'Import system ready',
+    supportedFormats: ['CSV', 'PDF'],
+    profiles: {
+      csv: IMPORT_PROFILES.CSV.length,
+      pdf: IMPORT_PROFILES.PDF.length
+    },
+    features: [
+      'Fixed 1969 date parsing issues',
+      'PDF OCR text extraction',
+      'Vendor pattern learning',
+      'Auto-detect CSV formats',
+      'Batch import capability',
+      'Training data extraction'
+    ]
+  };
+}
 
 // Enhanced categorization with machine learning-like pattern recognition
 const CATEGORY_STOPWORDS = new Set([
@@ -2513,9 +3350,100 @@ function _processNewEmails() {
     
     _logInfo(`Email processing completed`, { processed: processedCount, staged: stagedCount, total: processedCount + stagedCount });
     
+    // Sort transactions by date to maintain chronological order (most recent first)
+    if (processedCount > 0) {
+      _sortTransactionsByDate();
+    }
+    
   } catch (error) {
     _logError('Failed to process new emails', error);
     throw error;
+  }
+}
+
+/**
+ * Public function to manually sort all transactions
+ * Useful for organizing existing data or after bulk imports
+ */
+function sortAllTransactions() {
+  try {
+    _logInfo('Starting manual transaction sort...');
+    
+    _sortTransactionsByDate();
+    
+    const message = 'All transactions have been sorted by date (most recent first)';
+    _logInfo(message);
+    
+    // Update dashboard to reflect the sorting
+    _updateDashboard();
+    
+    return {
+      success: true,
+      message: message,
+      timestamp: new Date()
+    };
+    
+  } catch (error) {
+    const errorMsg = `Failed to sort transactions: ${error.message}`;
+    _logError(errorMsg, error);
+    
+    return {
+      success: false,
+      error: errorMsg,
+      timestamp: new Date()
+    };
+  }
+}
+
+/**
+ * Get transaction order statistics
+ */
+function getTransactionOrderStats() {
+  try {
+    const transactionSheet = _getOrCreateSheet('Transactions');
+    const data = transactionSheet.getDataRange().getValues();
+    
+    if (data.length <= 1) {
+      return {
+        totalTransactions: 0,
+        properlyOrdered: true,
+        dateRange: null
+      };
+    }
+    
+    const transactions = data.slice(1); // Skip header
+    let properlyOrdered = true;
+    let outOfOrderCount = 0;
+    
+    // Check chronological order
+    for (let i = 0; i < transactions.length - 1; i++) {
+      const currentDate = new Date(transactions[i][0]);
+      const nextDate = new Date(transactions[i + 1][0]);
+      
+      if (currentDate.getTime() < nextDate.getTime()) {
+        properlyOrdered = false;
+        outOfOrderCount++;
+      }
+    }
+    
+    const oldestDate = new Date(transactions[transactions.length - 1][0]);
+    const newestDate = new Date(transactions[0][0]);
+    
+    return {
+      totalTransactions: transactions.length,
+      properlyOrdered: properlyOrdered,
+      outOfOrderCount: outOfOrderCount,
+      dateRange: {
+        oldest: oldestDate,
+        newest: newestDate,
+        span: Math.ceil((newestDate - oldestDate) / (1000 * 60 * 60 * 24)) // days
+      },
+      needsSorting: !properlyOrdered
+    };
+    
+  } catch (error) {
+    _logError('Failed to get transaction order stats', error);
+    return { error: error.message };
   }
 }
 
@@ -2573,6 +3501,88 @@ function _commitTransaction(transaction, mainSheet, accountsSheet) {
     
   } catch (error) {
     _logError('Failed to commit transaction', error, { transaction });
+  }
+}
+
+/**
+ * Sort the Transactions sheet by date (most recent first)
+ */
+function _sortTransactionsByDate(sheet = null) {
+  try {
+    const transactionSheet = sheet || _getOrCreateSheet('Transactions');
+    const data = transactionSheet.getDataRange().getValues();
+    
+    if (data.length <= 1) return; // Only header or empty
+    
+    const headers = data[0];
+    const transactions = data.slice(1);
+    
+    // Find date column (should be first column)
+    const dateColumnIndex = 0;
+    
+    // Sort transactions by date (most recent first)
+    transactions.sort((a, b) => {
+      const dateA = new Date(a[dateColumnIndex]);
+      const dateB = new Date(b[dateColumnIndex]);
+      
+      // If times are available (same date), sort by time as well
+      if (dateA.toDateString() === dateB.toDateString()) {
+        return dateB.getTime() - dateA.getTime();
+      }
+      
+      return dateB.getTime() - dateA.getTime();
+    });
+    
+    // Clear and repopulate the sheet
+    transactionSheet.clear();
+    transactionSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    
+    if (transactions.length > 0) {
+      transactionSheet.getRange(2, 1, transactions.length, headers.length).setValues(transactions);
+    }
+    
+    _logInfo(`Sorted ${transactions.length} transactions by date (most recent first)`);
+    
+  } catch (error) {
+    _logError('Failed to sort transactions by date', error);
+  }
+}
+
+/**
+ * Enhanced _addTransactionToSheet function with automatic sorting
+ */
+function _addTransactionToSheet(transaction, accountName) {
+  try {
+    const transactionSheet = _getOrCreateSheet('Transactions');
+    
+    // Prepare transaction row with proper date handling
+    const transactionDate = transaction.date instanceof Date ? transaction.date : new Date(transaction.date);
+    const amount = parseFloat(transaction.amount) || 0;
+    
+    const row = [
+      transactionDate,
+      amount,
+      transaction.account || accountName || '',
+      transaction.description || '',
+      transaction.category || 'Uncategorized',
+      transaction.source || 'Import',
+      new Date(), // Import timestamp
+      transaction.fingerprint || _generateFingerprint(transaction)
+    ];
+    
+    // Add the transaction
+    transactionSheet.appendRow(row);
+    
+    // Update account balances if this is a known account
+    if (MY_ACCOUNTS.hasOwnProperty(accountName)) {
+      _updateAccountBalance(accountName, amount);
+    }
+    
+    _logInfo(`Added transaction: ${transaction.description} (${amount}) to ${accountName}`);
+    
+  } catch (error) {
+    _logError('Failed to add transaction to sheet', error, { transaction, accountName });
+    throw error;
   }
 }
 
