@@ -5,6 +5,8 @@
   "main": "excel-analyzer.js",
   "scripts": {
     "analyze": "node excel-analyzer.js",
+    "analyze-managed": "node excel-analyzer.js",
+    "clean": "node -e \"const ExcelAnalyzer = require('./excel-analyzer.js'); const analyzer = new ExcelAnalyzer(); analyzer.postAnalysisCleanup().then(() => console.log('✅ Manual cleanup complete'));\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {

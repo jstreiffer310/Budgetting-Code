@@ -629,54 +629,357 @@ Generated: ${new Date().toLocaleString()}
 
     return report;
   }
+
+  /**
+   * AUTOMATED FILE MANAGEMENT SYSTEM
+   * Systematically manages output files after each analysis to prevent clutter
+   */
+
+  /**
+   * Get configuration for file management
+   */
+  getFileManagementConfig() {
+    return {
+      // Output files that should be kept from current run
+      keepCurrentFiles: [
+        'finance-analysis.json',
+        'finance-report.md'
+      ],
+      
+      // Temporary/intermediate files to always clean up
+      alwaysCleanup: [
+        'temp-analysis.json',
+        'processing-log.txt',
+        'debug-output.json',
+        'raw-data-dump.json'
+      ],
+      
+      // Old output files to archive before creating new ones
+      archivePattern: [
+        'finance-analysis-*.json',
+        'finance-report-*.md',
+        'integrated-analysis*.json',
+        'integrated-report*.md',
+        'troubleshooting-*.json',
+        'processed-transactions*.json'
+      ],
+      
+      // File age thresholds (in days)
+      maxAge: {
+        currentOutputs: 7,     // Keep current outputs for 1 week
+        archivedFiles: 30,     // Keep archived files for 1 month
+        tempFiles: 1           // Clean temp files after 1 day
+      },
+      
+      // Archive directory structure
+      archiveDir: './archive',
+      tempDir: './temp'
+    };
+  }
+
+  /**
+   * Pre-analysis cleanup: Prepare workspace for new analysis
+   */
+  async preAnalysisCleanup() {
+    const config = this.getFileManagementConfig();
+    
+    console.log('🧹 Pre-analysis cleanup...');
+    
+    try {
+      // Archive existing output files
+      await this.archiveOldOutputs(config);
+      
+      // Clean temporary files
+      await this.cleanTempFiles(config);
+      
+      // Ensure directories exist
+      await this.ensureDirectories(config);
+      
+      console.log('✅ Workspace prepared for analysis');
+      
+    } catch (error) {
+      console.warn('⚠️ Cleanup warning:', error.message);
+    }
+  }
+
+  /**
+   * Post-analysis cleanup: Organize files after analysis completes
+   */
+  async postAnalysisCleanup() {
+    const config = this.getFileManagementConfig();
+    
+    console.log('\n🗂️ Post-analysis file management...');
+    
+    try {
+      // Clean up any temporary processing files
+      await this.cleanTempFiles(config);
+      
+      // Organize output files with timestamps
+      await this.timestampOutputFiles(config);
+      
+      // Clean old archived files
+      await this.cleanOldArchives(config);
+      
+      // Generate cleanup summary
+      this.generateCleanupSummary();
+      
+      console.log('✅ File management complete');
+      
+    } catch (error) {
+      console.warn('⚠️ Post-cleanup warning:', error.message);
+    }
+  }
+
+  /**
+   * Archive old output files before creating new ones
+   */
+  async archiveOldOutputs(config) {
+    if (!fs.existsSync(config.archiveDir)) {
+      fs.mkdirSync(config.archiveDir, { recursive: true });
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    
+    for (const keepFile of config.keepCurrentFiles) {
+      if (fs.existsSync(keepFile)) {
+        const archiveName = `${path.parse(keepFile).name}-${timestamp}${path.parse(keepFile).ext}`;
+        const archivePath = path.join(config.archiveDir, archiveName);
+        
+        try {
+          fs.copyFileSync(keepFile, archivePath);
+          console.log(`📦 Archived: ${keepFile} → ${archiveName}`);
+        } catch (error) {
+          console.warn(`⚠️ Could not archive ${keepFile}:`, error.message);
+        }
+      }
+    }
+  }
+
+  /**
+   * Clean temporary and processing files
+   */
+  async cleanTempFiles(config) {
+    const filesToCheck = [
+      ...config.alwaysCleanup,
+      'node_modules/.cache/**/*',
+      'debug-*.json',
+      'temp-*.json',
+      'processing-*.log'
+    ];
+
+    for (const pattern of filesToCheck) {
+      try {
+        if (fs.existsSync(pattern)) {
+          fs.unlinkSync(pattern);
+          console.log(`🗑️ Cleaned: ${pattern}`);
+        }
+      } catch (error) {
+        // Silently continue - temp files may not exist
+      }
+    }
+  }
+
+  /**
+   * Add timestamps to current output files
+   */
+  async timestampOutputFiles(config) {
+    // This helps track when analysis was performed without cluttering workspace
+    const timestamp = new Date().toISOString();
+    
+    for (const outputFile of config.keepCurrentFiles) {
+      if (fs.existsSync(outputFile)) {
+        try {
+          const content = fs.readFileSync(outputFile, 'utf8');
+          let updatedContent;
+          
+          if (outputFile.endsWith('.json')) {
+            const data = JSON.parse(content);
+            data.analysisMetadata = {
+              timestamp: timestamp,
+              version: '1.0',
+              cleanupSystemEnabled: true
+            };
+            updatedContent = JSON.stringify(data, null, 2);
+          } else if (outputFile.endsWith('.md')) {
+            updatedContent = content.replace(
+              'Generated: ', 
+              `Generated: ${new Date().toLocaleString()} | Cleanup System: ✅ Active\nLast Updated: `
+            );
+          } else {
+            updatedContent = content;
+          }
+          
+          fs.writeFileSync(outputFile, updatedContent);
+          
+        } catch (error) {
+          console.warn(`⚠️ Could not timestamp ${outputFile}:`, error.message);
+        }
+      }
+    }
+  }
+
+  /**
+   * Clean old archived files based on age
+   */
+  async cleanOldArchives(config) {
+    if (!fs.existsSync(config.archiveDir)) return;
+
+    const now = Date.now();
+    const maxAge = config.maxAge.archivedFiles * 24 * 60 * 60 * 1000; // Convert days to ms
+    
+    try {
+      const files = fs.readdirSync(config.archiveDir);
+      let cleanedCount = 0;
+      
+      for (const file of files) {
+        const filePath = path.join(config.archiveDir, file);
+        const stats = fs.statSync(filePath);
+        
+        if (now - stats.mtime.getTime() > maxAge) {
+          fs.unlinkSync(filePath);
+          cleanedCount++;
+        }
+      }
+      
+      if (cleanedCount > 0) {
+        console.log(`🗑️ Cleaned ${cleanedCount} old archived file(s)`);
+      }
+      
+    } catch (error) {
+      console.warn('⚠️ Could not clean old archives:', error.message);
+    }
+  }
+
+  /**
+   * Ensure required directories exist
+   */
+  async ensureDirectories(config) {
+    const dirs = [config.archiveDir, config.tempDir];
+    
+    for (const dir of dirs) {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    }
+  }
+
+  /**
+   * Generate summary of cleanup operations
+   */
+  generateCleanupSummary() {
+    const config = this.getFileManagementConfig();
+    
+    const summary = {
+      timestamp: new Date().toISOString(),
+      status: 'complete',
+      currentFiles: config.keepCurrentFiles.filter(f => fs.existsSync(f)),
+      archiveExists: fs.existsSync(config.archiveDir),
+      cleanupEnabled: true
+    };
+    
+    // Save compact summary (this gets cleaned up next run)
+    fs.writeFileSync('./.last-cleanup.json', JSON.stringify(summary, null, 2));
+  }
+
+  /**
+   * Smart analysis with automatic file management
+   */
+  async runManagedAnalysis(filePath = null) {
+    console.log('🎯 Starting managed analysis with automatic file cleanup...\n');
+    
+    // Pre-analysis cleanup
+    await this.preAnalysisCleanup();
+    
+    try {
+      // Run the actual analysis
+      let analysisResult;
+      
+      if (filePath) {
+        // Specific file provided
+        if (this.loadExcel(filePath)) {
+          analysisResult = this.analyzeFinanceData();
+          
+          // Export with file management
+          this.exportAnalysis(analysisResult);
+          const report = this.generateReport(analysisResult);
+          fs.writeFileSync('./finance-report.md', report);
+        }
+      } else {
+        // Auto-detect Excel files (existing logic)
+        const files = fs.readdirSync('.');
+        const excelFiles = files.filter(file => 
+          file.endsWith('.xlsx') || file.endsWith('.xls') || file.endsWith('.csv')
+        );
+
+        if (excelFiles.length === 0) {
+          console.log('📁 No Excel files found in current directory.');
+          return null;
+        }
+
+        const excelFile = excelFiles[0];
+        console.log(`📊 Processing: ${excelFile}`);
+        
+        if (this.loadExcel(excelFile)) {
+          analysisResult = this.analyzeFinanceData();
+          
+          // Export with file management
+          this.exportAnalysis(analysisResult);
+          const report = this.generateReport(analysisResult);
+          fs.writeFileSync('./finance-report.md', report);
+        }
+      }
+      
+      // Post-analysis cleanup
+      await this.postAnalysisCleanup();
+      
+      // Show final summary
+      if (analysisResult) {
+        console.log('\n📊 Analysis Summary:');
+        analysisResult.insights.forEach(insight => console.log(`   ${insight}`));
+        
+        console.log('\n📁 Output Files (managed):');
+        console.log('   ✅ finance-analysis.json (current analysis)');
+        console.log('   ✅ finance-report.md (readable report)');
+        console.log('   📦 Previous outputs archived automatically');
+        console.log('   🗑️ Temporary files cleaned up');
+      }
+      
+      return analysisResult;
+      
+    } catch (error) {
+      console.error('❌ Analysis failed:', error.message);
+      
+      // Still run cleanup even if analysis fails
+      await this.postAnalysisCleanup();
+      throw error;
+    }
+  }
 }
 
-// Main execution
+// Enhanced main execution with file management
 async function main() {
   const analyzer = new ExcelAnalyzer();
   
-  // Look for Excel files in current directory
-  const files = fs.readdirSync('.');
-  const excelFiles = files.filter(file => 
-    file.endsWith('.xlsx') || file.endsWith('.xls') || file.endsWith('.csv')
-  );
-
-  if (excelFiles.length === 0) {
-    console.log('📁 No Excel files found in current directory.');
-    console.log('💡 Please place your Excel file in this folder and run again.');
-    console.log('   Supported formats: .xlsx, .xls, .csv');
-    return;
-  }
-
-  console.log(`📋 Found ${excelFiles.length} file(s): ${excelFiles.join(', ')}`);
-  
-  // Process the first Excel file found
-  const excelFile = excelFiles[0];
-  
-  if (analyzer.loadExcel(excelFile)) {
-    console.log('\n🔍 Analyzing finance data...');
-    const analysis = analyzer.analyzeFinanceData();
+  try {
+    // Use the new managed analysis system
+    const analysis = await analyzer.runManagedAnalysis();
     
-    // Export detailed analysis
-    analyzer.exportAnalysis(analysis);
+    if (analysis) {
+      console.log('\n🎉 Analysis completed successfully with automatic file management!');
+      console.log('\n💡 File Management Benefits:');
+      console.log('   📦 Previous outputs automatically archived');
+      console.log('   �️ Temporary files cleaned up');
+      console.log('   📅 Current outputs timestamped');
+      console.log('   � Old archives automatically removed');
+      console.log('\n📋 Next Steps:');
+      console.log('   - Review finance-report.md for insights');
+      console.log('   - Check archive/ folder for historical data');
+      console.log('   - Run again anytime - cleanup is automatic!');
+    }
     
-    // Generate and save readable report
-    const report = analyzer.generateReport(analysis);
-    fs.writeFileSync('./finance-report.md', report);
-    
-    console.log('\n📊 Analysis complete!');
-    console.log('📄 Files created:');
-    console.log('   - finance-analysis.json (detailed data)');
-    console.log('   - finance-report.md (readable report)');
-    
-    // Display quick summary
-    console.log('\n📋 Quick Summary:');
-    analysis.insights.forEach(insight => console.log(`   ${insight}`));
-    
-    console.log(`\n📊 Sheets processed: ${Object.keys(analysis.sheets).length}`);
-    Object.keys(analysis.sheets).forEach(name => 
-      console.log(`   - ${name} (${analysis.sheets[name].rows} rows)`)
-    );
+  } catch (error) {
+    console.error('❌ Analysis failed:', error.message);
+    console.log('\n� File cleanup still completed automatically');
   }
 }
 

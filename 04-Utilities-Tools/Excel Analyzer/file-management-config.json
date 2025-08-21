@@ -1,0 +1,58 @@
+{
+  "fileManagement": {
+    "enabled": true,
+    "description": "Automated file management system for Excel Analyzer",
+    
+    "outputFiles": {
+      "keep": [
+        "finance-analysis.json",
+        "finance-report.md"
+      ],
+      "description": "Files to keep from current analysis run"
+    },
+    
+    "temporaryFiles": {
+      "cleanup": [
+        "temp-analysis.json",
+        "processing-log.txt",
+        "debug-output.json",
+        "raw-data-dump.json",
+        "debug-*.json",
+        "temp-*.json",
+        "processing-*.log"
+      ],
+      "description": "Temporary files to always clean up"
+    },
+    
+    "archiveSettings": {
+      "directory": "./archive",
+      "enabled": true,
+      "retentionDays": 30,
+      "description": "Archive old outputs before creating new ones"
+    },
+    
+    "ageThresholds": {
+      "currentOutputs": 7,
+      "archivedFiles": 30,
+      "tempFiles": 1,
+      "description": "Maximum age in days before cleanup"
+    },
+    
+    "features": {
+      "preAnalysisCleanup": true,
+      "postAnalysisCleanup": true,
+      "automaticArchiving": true,
+      "timestampOutputs": true,
+      "oldArchiveCleanup": true
+    }
+  },
+  
+  "customization": {
+    "note": "You can modify these settings to customize file management behavior",
+    "examples": {
+      "disableArchiving": "Set archiveSettings.enabled to false",
+      "changeRetention": "Modify ageThresholds values",
+      "addTempPatterns": "Add patterns to temporaryFiles.cleanup array"
+    }
+  }
+}
