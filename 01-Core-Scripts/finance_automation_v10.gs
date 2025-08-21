@@ -1095,9 +1095,10 @@ const ENHANCED_MERCHANT_PATTERNS = {
 /**
  * Get or create a sheet by name
  * @param {string} sheetName - Name of the sheet
+ * @param {Array} customHeaders - Optional custom headers array
  * @returns {GoogleAppsScript.Spreadsheet.Sheet} - The sheet object
  */
-function _getOrCreateSheet(sheetName) {
+function _getOrCreateSheet(sheetName, customHeaders = null) {
   try {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     let sheet = spreadsheet.getSheetByName(sheetName);
@@ -1106,34 +1107,57 @@ function _getOrCreateSheet(sheetName) {
       console.log(`Creating new sheet: ${sheetName}`);
       sheet = spreadsheet.insertSheet(sheetName);
       
-      // Set up headers based on sheet type
-      switch (sheetName) {
-        case SHEET_NAMES.MAIN:
-          sheet.getRange(1, 1, 1, 10).setValues([['Date', 'Amount', 'From', 'To', 'Bank', 'Notes', 'EmailId', 'Category', 'Type', 'Fingerprint']]);
-          break;
-        case SHEET_NAMES.ACCOUNTS:
-          sheet.getRange(1, 1, 1, 4).setValues([['Account', 'Balance', 'Last Updated', 'Type']]);
-          break;
-        case SHEET_NAMES.HOLDINGS:
-          sheet.getRange(1, 1, 1, 6).setValues([['Account', 'Ticker', 'Shares', 'Unit Price (CAD)', 'Total Value (CAD)', 'Last Updated']]);
-          break;
-        case SHEET_NAMES.STAGING:
-          sheet.getRange(1, 1, 1, 10).setValues([['Date', 'Amount', 'From', 'To', 'Bank', 'EmailId', 'StagedAt', 'Direction', 'Status', 'Fingerprint']]);
-          break;
-        case SHEET_NAMES.AUDIT_LOG:
-          sheet.getRange(1, 1, 1, 5).setValues([['Timestamp', 'Level', 'Message', 'Context', 'User']]);
-          break;
-        case SHEET_NAMES.AI_LEARNING:
-          sheet.getRange(1, 1, 1, 10).setValues([['Timestamp', 'LearningType', 'Pattern', 'Context', 'Confidence', 'SuccessCount', 'FailureCount', 'Metadata', 'Status', 'CrossValidated']]);
-          break;
-        case SHEET_NAMES.FAILED_PARSING:
-          sheet.getRange(1, 1, 1, 10).setValues([['Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 'FailureReason', 'AttemptedParsers', 'AIAnalysis', 'Status', 'Priority']]);
-          break;
-        case SHEET_NAMES.CSV_IMPORT:
-          sheet.getRange(1, 1, 1, 5).setValues([['Date', 'Description', 'Amount', 'Source', 'Processed']]);
-          break;
-        default:
-          sheet.getRange(1, 1, 1, 2).setValues([['Data', 'Value']]);
+      // Use custom headers if provided, otherwise use predefined headers
+      if (customHeaders && customHeaders.length > 0) {
+        sheet.getRange(1, 1, 1, customHeaders.length).setValues([customHeaders]);
+        // Format header row
+        const headerRange = sheet.getRange(1, 1, 1, customHeaders.length);
+        headerRange.setFontWeight('bold');
+        headerRange.setBackground('#e1f5fe');
+      } else {
+        // Set up default headers based on sheet type
+        switch (sheetName) {
+          case SHEET_NAMES.MAIN:
+            sheet.getRange(1, 1, 1, 10).setValues([['Date', 'Amount', 'From', 'To', 'Bank', 'Notes', 'EmailId', 'Category', 'Type', 'Fingerprint']]);
+            break;
+          case SHEET_NAMES.ACCOUNTS:
+            sheet.getRange(1, 1, 1, 4).setValues([['Account', 'Balance', 'Last Updated', 'Type']]);
+            break;
+          case SHEET_NAMES.HOLDINGS:
+            sheet.getRange(1, 1, 1, 6).setValues([['Account', 'Ticker', 'Shares', 'Unit Price (CAD)', 'Total Value (CAD)', 'Last Updated']]);
+            break;
+          case SHEET_NAMES.STAGING:
+            sheet.getRange(1, 1, 1, 10).setValues([['Date', 'Amount', 'From', 'To', 'Bank', 'EmailId', 'StagedAt', 'Direction', 'Status', 'Fingerprint']]);
+            break;
+          case SHEET_NAMES.AUDIT_LOG:
+            sheet.getRange(1, 1, 1, 5).setValues([['Timestamp', 'Level', 'Message', 'Context', 'User']]);
+            break;
+          case SHEET_NAMES.AI_LEARNING:
+            sheet.getRange(1, 1, 1, 10).setValues([['Timestamp', 'LearningType', 'Pattern', 'Context', 'Confidence', 'SuccessCount', 'FailureCount', 'Metadata', 'Status', 'CrossValidated']]);
+            break;
+          case SHEET_NAMES.FAILED_PARSING:
+            sheet.getRange(1, 1, 1, 10).setValues([['Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 'FailureReason', 'AttemptedParsers', 'AIAnalysis', 'Status', 'Priority']]);
+            break;
+          case SHEET_NAMES.CSV_IMPORT:
+            sheet.getRange(1, 1, 1, 5).setValues([['Date', 'Description', 'Amount', 'Source', 'Processed']]);
+            break;
+          case SHEET_NAMES.DIAGNOSTIC_HUB:
+            sheet.getRange(1, 1, 1, 12).setValues([['Timestamp', 'SystemComponent', 'IssueType', 'Severity', 'Description', 'DataSample', 'RecommendedAction', 'AffectedRecords', 'Status', 'ResolvedAt', 'Category', 'TrendIndicator']]);
+            break;
+          case 'Excel_Analyzer_Output':
+            sheet.getRange(1, 1, 1, 8).setValues([['Timestamp', 'FileName', 'SheetName', 'Analysis', 'Issues', 'Recommendations', 'DataQuality', 'Status']]);
+            break;
+          case 'Error_Analysis':
+            sheet.getRange(1, 1, 1, 6).setValues([['Pattern', 'Frequency', 'Impact', 'Root Cause', 'Suggested Fix', 'Status']]);
+            break;
+          default:
+            sheet.getRange(1, 1, 1, 2).setValues([['Data', 'Value']]);
+        }
+        
+        // Format default header row
+        const headerRange = sheet.getRange(1, 1, 1, sheet.getLastColumn());
+        headerRange.setFontWeight('bold');
+        headerRange.setBackground('#e1f5fe');
       }
     }
     
@@ -9172,5 +9196,126 @@ function fixDataFormatting() {
     
   } catch (error) {
     ui.alert(`❌ Error fixing formatting: ${error.message}`);
+  }
+}
+
+/**
+ * 🔧 Initialize or Upgrade to Unified Diagnostic System
+ * Run this function to create the consolidated diagnostic hub
+ */
+function initializeUnifiedDiagnosticSystem() {
+  const ui = SpreadsheetApp.getUi();
+  
+  try {
+    ui.alert('⏳ Initializing unified diagnostic system...');
+    
+    // Create the diagnostic hub with proper headers
+    const diagnosticHeaders = [
+      'Timestamp', 'SystemComponent', 'IssueType', 'Severity', 
+      'Description', 'DataSample', 'RecommendedAction', 'AffectedRecords', 
+      'Status', 'ResolvedAt', 'Category', 'TrendIndicator'
+    ];
+    
+    const diagnosticSheet = _getOrCreateSheet(SHEET_NAMES.DIAGNOSTIC_HUB, diagnosticHeaders);
+    
+    // Create Excel analyzer output sheet
+    const excelHeaders = [
+      'Timestamp', 'FileName', 'SheetName', 'Analysis', 
+      'Issues', 'Recommendations', 'DataQuality', 'Status'
+    ];
+    
+    const excelSheet = _getOrCreateSheet('Excel_Analyzer_Output', excelHeaders);
+    
+    // Run initial diagnostic analysis
+    const analysisResult = runConsolidatedAnalysis();
+    
+    ui.alert(
+      '✅ Unified Diagnostic System Ready!',
+      '🎯 System successfully initialized:\n\n' +
+      `📊 Diagnostic_Hub sheet created\n` +
+      `📈 Excel_Analyzer_Output sheet created\n` +
+      `🔍 Initial analysis completed\n\n` +
+      'You can now use the unified diagnostic features!',
+      ui.ButtonSet.OK
+    );
+    
+    return {
+      success: true,
+      diagnosticSheet: diagnosticSheet.getName(),
+      excelSheet: excelSheet.getName(),
+      analysisResult: analysisResult
+    };
+    
+  } catch (error) {
+    ui.alert(
+      '❌ Initialization Failed',
+      `🚨 Error initializing system:\n\n${error.message}\n\n` +
+      'Please check the console logs for details.',
+      ui.ButtonSet.OK
+    );
+    
+    _logError('Failed to initialize unified diagnostic system', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * 🔍 Quick Diagnostic Check
+ * Simple function to verify system health
+ */
+function quickDiagnosticCheck() {
+  const ui = SpreadsheetApp.getUi();
+  
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const diagnosticHub = ss.getSheetByName(SHEET_NAMES.DIAGNOSTIC_HUB);
+    
+    if (!diagnosticHub) {
+      const response = ui.alert(
+        '⚠️ Diagnostic System Not Found',
+        '🔧 The unified diagnostic system is not set up.\n\n' +
+        'Would you like to initialize it now?',
+        ui.ButtonSet.YES_NO
+      );
+      
+      if (response === ui.Button.YES) {
+        return initializeUnifiedDiagnosticSystem();
+      }
+      return;
+    }
+    
+    // Check system health
+    const lastRow = diagnosticHub.getLastRow();
+    const recentData = lastRow > 1 ? diagnosticHub.getRange(Math.max(2, lastRow - 9), 1, Math.min(10, lastRow - 1), 4).getValues() : [];
+    
+    let statusReport = '🏥 QUICK DIAGNOSTIC REPORT\n\n';
+    statusReport += `📊 Total diagnostic entries: ${lastRow - 1}\n`;
+    
+    if (recentData.length > 0) {
+      const criticalIssues = recentData.filter(row => row[3] === 'CRITICAL').length;
+      const warnings = recentData.filter(row => row[3] === 'WARNING').length;
+      
+      statusReport += `🚨 Recent critical issues: ${criticalIssues}\n`;
+      statusReport += `⚠️ Recent warnings: ${warnings}\n`;
+      
+      if (criticalIssues === 0 && warnings === 0) {
+        statusReport += '\n✅ System Status: Healthy';
+      } else if (criticalIssues > 0) {
+        statusReport += '\n🚨 System Status: Needs Attention';
+      } else {
+        statusReport += '\n⚠️ System Status: Minor Issues';
+      }
+    } else {
+      statusReport += '\n📝 System Status: No recent activity';
+    }
+    
+    ui.alert('🔍 Quick Diagnostic Check', statusReport, ui.ButtonSet.OK);
+    
+  } catch (error) {
+    ui.alert(
+      '❌ Diagnostic Check Failed',
+      `🚨 Error running diagnostic check:\n\n${error.message}`,
+      ui.ButtonSet.OK
+    );
   }
 }
