@@ -36,7 +36,7 @@ const SHEET_NAMES = {
   HOLDINGS: 'Holdings',
   STAGING: 'Staging',
   CATEGORIES: 'Categories',
-  NETWORTH: 'NetWorthHistory',
+  NETWORTH: 'NetWorthHistory',  // Legacy - now integrated into Dashboard
   DASHBOARD: 'Dashboard',
   CSV_IMPORT: 'CSV_Import',
   AUDIT_LOG: 'AuditLog',
@@ -1257,9 +1257,6 @@ function _setupInitialSheets(ss) {
       ],
       [SHEET_NAMES.DASHBOARD]: [
         'Finance Dashboard - Auto-Generated'
-      ],
-      [SHEET_NAMES.NET_WORTH]: [
-        'Date', 'Net Worth'
       ],
       [SHEET_NAMES.CSV_IMPORT]: [
         'Import Date', 'Source File', 'Records Imported', 'Status', 'Notes'
@@ -4585,10 +4582,10 @@ function _updateNetWorth() {
     const ss = _ss();
     const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
     const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
-    const netWorthSheet = ss.getSheetByName(SHEET_NAMES.NETWORTH);
+    const dashboardSheet = ss.getSheetByName(SHEET_NAMES.DASHBOARD);
     
-    if (!netWorthSheet) {
-      _logError('NetWorthHistory sheet not found');
+    if (!dashboardSheet) {
+      _logError('Dashboard sheet not found');
       return;
     }
     
@@ -4640,17 +4637,35 @@ function _updateNetWorth() {
     const netWorth = totalCash + totalInvestments - totalLiabilities;
     const today = new Date();
     
-    // Add entry to net worth history
-    netWorthSheet.appendRow([
+    // Find or create net worth tracking section in dashboard
+    let netWorthStartRow = _findOrCreateDashboardSection(dashboardSheet, 'NET WORTH HISTORY');
+    
+    // Add headers if this is a new section
+    const headers = ['Date', 'Cash & Accounts', 'Investments', 'Liabilities', 'Net Worth', 'Notes'];
+    const headerRange = dashboardSheet.getRange(netWorthStartRow, 1, 1, headers.length);
+    if (headerRange.getValue() !== 'Date') {
+      headerRange.setValues([headers]);
+      headerRange.setFontWeight('bold').setBackground('#e6f3ff');
+      netWorthStartRow += 1;
+    }
+    
+    // Add new net worth entry
+    dashboardSheet.insertRowAfter(netWorthStartRow);
+    const newRow = netWorthStartRow + 1;
+    dashboardSheet.getRange(newRow, 1, 1, 6).setValues([[
       today,
       totalCash,
       totalInvestments,
       totalLiabilities,
       netWorth,
-      `Cash: $${totalCash.toFixed(2)}, Investments: $${totalInvestments.toFixed(2)}, Debt: $${totalLiabilities.toFixed(2)}`
-    ]);
+      `Updated: ${today.toLocaleString()}`
+    ]]);
     
-    _logInfo(`Net worth updated: $${netWorth.toFixed(2)}`, {
+    // Format the new row
+    dashboardSheet.getRange(newRow, 1).setNumberFormat('mm/dd/yyyy');
+    dashboardSheet.getRange(newRow, 2, 1, 4).setNumberFormat('$#,##0.00');
+    
+    _logInfo(`Net worth updated in dashboard: $${netWorth.toFixed(2)}`, {
       cash: totalCash.toFixed(2),
       investments: totalInvestments.toFixed(2),
       liabilities: totalLiabilities.toFixed(2)
@@ -4663,7 +4678,7 @@ function _updateNetWorth() {
         `Cash & Accounts: $${totalCash.toFixed(2)}\n` +
         `Investments: $${totalInvestments.toFixed(2)}\n` +
         `Liabilities: $${totalLiabilities.toFixed(2)}\n\n` +
-        `Data added to NetWorthHistory sheet.`,
+        `Data added to Dashboard with chart-ready format.`,
         SpreadsheetApp.getUi().ButtonSet.OK
       );
     } catch (e) {}
@@ -4676,14 +4691,24 @@ function _updateNetWorth() {
   }
 }
 
-function _learnCategoryFromHistory(transaction, categoriesSheet) {
-  // This function is deprecated - use _getLearnedCategory instead
-  return _getLearnedCategory(transaction);
-}
-
-function _extractMerchantName(toAccount) {
-  // This function is deprecated - use _extractCleanMerchantName instead
-  return _extractCleanMerchantName(toAccount);
+function _findOrCreateDashboardSection(dashboardSheet, sectionTitle) {
+  // Look for existing section
+  const data = dashboardSheet.getDataRange().getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (data[i][0] && data[i][0].toString().toUpperCase().includes(sectionTitle)) {
+      return i + 2; // Return row after the section header
+    }
+  }
+  
+  // Section not found, create it at the end
+  const lastRow = dashboardSheet.getLastRow();
+  const sectionStartRow = lastRow + 2;
+  
+  // Add section header
+  dashboardSheet.getRange(sectionStartRow, 1).setValue(sectionTitle);
+  dashboardSheet.getRange(sectionStartRow, 1).setFontWeight('bold').setFontSize(12).setBackground('#d9ead3');
+  
+  return sectionStartRow + 1; // Return row after the section header
 }
 
 function _containsGenericBankingTerms(text) {
@@ -5059,6 +5084,10 @@ function refreshHoldings() {
 
 function updateNetWorth() {
   _updateNetWorth();
+}
+
+function learnCategoriesFromTransactions() {
+  _learnCategoriesFromTransactions();
 }
 
 function forceLearnCategoriesLowThreshold() {
@@ -6278,7 +6307,6 @@ function exportDataForAnalysis() {
       SHEET_NAMES.CATEGORIES,
       SHEET_NAMES.AI_LEARNING,
       SHEET_NAMES.HOLDINGS,
-      SHEET_NAMES.NETWORTH,
       SHEET_NAMES.DASHBOARD,
       SHEET_NAMES.STAGING,
       SHEET_NAMES.FAILED_PARSING
