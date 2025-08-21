@@ -775,7 +775,7 @@ const SENDER_PROFILES = {
 
   'paypal': {
     name: 'PayPal',
-    domains: ['paypal.com', 'intl.paypal.com'],
+    domains: ['paypal.com', 'intl.paypal.com', 'service@intl.paypal.com'],
     capabilities: {
       merchantInfo: 'excellent',       // Detailed merchant names and info
       accountInfo: 'linked_card',      // Shows linked payment method
@@ -796,9 +796,16 @@ function _identifyEmailSender(from, subject, body) {
   const subjectLower = _lc(subject);
   const bodyLower = _lc(body);
   
+  _logInfo(`Identifying sender`, { 
+    from: from,
+    subject: subject,
+    bodyPreview: body.substring(0, 100)
+  });
+  
   // Primary domain-based detection
   for (const [senderId, profile] of Object.entries(SENDER_PROFILES)) {
     if (profile.domains.some(domain => fromLower.includes(domain))) {
+      _logInfo(`Domain match found: ${senderId}`, { domain: domain, confidence: 'high' });
       return { id: senderId, profile: profile, confidence: 'high' };
     }
   }
@@ -825,6 +832,7 @@ function _identifyEmailSender(from, subject, body) {
   
   if (fromLower.includes('paypal') || subjectLower.includes('paypal') ||
       /you authorized.*to/i.test(bodyLower) || /paypal.*transaction/i.test(bodyLower)) {
+    _logInfo(`PayPal keyword match found`, { confidence: 'medium' });
     return { id: 'paypal', profile: SENDER_PROFILES.paypal, confidence: 'medium' };
   }
   
@@ -1403,15 +1411,22 @@ function _parseWealthsimpleEmailEnhanced(message, subject, body, senderProfile) 
 
 // ENHANCED: PayPal Email Parser with sender-aware capabilities
 function _parsePayPalEmailEnhanced(message, subject, body, senderProfile) {
+  _logInfo(`PayPal parser started`, { 
+    subject: subject,
+    bodyPreview: body.substring(0, 200),
+    fromAddress: message.getFrom()
+  });
+  
   const subjectLower = _lc(subject);
   const bodyLower = _lc(body);
   
   // PayPal Authorization detection - Debit transaction
   const authKeywords = ['you authorized', 'authorization', 'authorized payment'];
   
-  if (authKeywords.some(keyword => bodyLower.includes(keyword))) {
+  if (authKeywords.some(keyword => subjectLower.includes(keyword) || bodyLower.includes(keyword))) {
     // Extract amount - PayPal often uses USD amounts
-    const usdAmountMatch = body.match(/(?:authorized|payment)\s+(?:of\s+)?(?:us\$|usd?\s*)([0-9,]+\.[0-9]+)/i);
+    const usdAmountMatch = body.match(/(?:authorized|payment).*?(?:us\$|usd?\s*)([0-9,]+\.[0-9]+)/i) ||
+                          subject.match(/(?:authorized|payment).*?(?:us\$|usd?\s*)([0-9,]+\.[0-9]+)/i);
     const cadAmountMatch = body.match(/\$([0-9,]+\.[0-9]+)\s+cad/i);
     
     let amount = 0;
@@ -1436,7 +1451,9 @@ function _parsePayPalEmailEnhanced(message, subject, body, senderProfile) {
     if (!amount) return null;
     
     // Extract merchant information
-    const merchantMatch = body.match(/(?:to|merchant)\s+([A-Za-z0-9\s,.\-&']+?)(?:\n|email|support|\+|$)/i);
+    const merchantMatch = body.match(/(?:to|merchant)\s+([A-Za-z0-9\s,.\-&']+?)(?:\n|email|support|\+|$)/i) ||
+                          subject.match(/(?:to|payment to)\s+([A-Za-z0-9\s,.\-&']+?)(?:\.|$)/i) ||
+                          body.match(/(?:authorized.*to)\s+([A-Za-z0-9\s,.\-&']+?)(?:\n|email|support|\+|$)/i);
     let merchant = merchantMatch ? merchantMatch[1].trim() : 'PayPal Merchant';
     
     // Extract linked payment method
