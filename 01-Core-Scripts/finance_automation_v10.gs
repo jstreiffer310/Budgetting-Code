@@ -8355,3 +8355,822 @@ function testPayPalProcessing() {
     return null;
   }
 }
+
+// ============================================================================
+// 🎯 USER INTERFACE - Easy Actions Menu System
+// ============================================================================
+
+/**
+ * 📱 Main Menu - Easy Finance Management Interface
+ * Run this function to access all features with simple menus
+ */
+function showMainMenu() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '🏦 Finance Automation - Main Menu',
+    '📊 What would you like to do?\n\n' +
+    '1️⃣ Import Data (PDF/CSV/Email)\n' +
+    '2️⃣ Sheet Management (Clean/Delete/Organize)\n' +
+    '3️⃣ Analysis & Reports\n' +
+    '4️⃣ System Health Check\n' +
+    '5️⃣ Advanced Tools\n\n' +
+    'Choose a number (1-5):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response === ui.Button.OK) {
+    const choice = ui.prompt('Enter choice (1-5):').getResponseText();
+    
+    switch(choice) {
+      case '1':
+        showImportMenu();
+        break;
+      case '2':
+        showSheetManagementMenu();
+        break;
+      case '3':
+        showAnalysisMenu();
+        break;
+      case '4':
+        showHealthCheckMenu();
+        break;
+      case '5':
+        showAdvancedToolsMenu();
+        break;
+      default:
+        ui.alert('❌ Invalid choice. Please run showMainMenu() again and choose 1-5.');
+    }
+  }
+}
+
+/**
+ * 📂 Import Data Menu - PDF, CSV, and Email Processing
+ */
+function showImportMenu() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '📂 Import Data Menu',
+    '📥 Choose import type:\n\n' +
+    '1️⃣ Import PDF Statement from Google Drive\n' +
+    '2️⃣ Import CSV File from Google Drive\n' +
+    '3️⃣ Process Recent Bank Emails\n' +
+    '4️⃣ Manual Transaction Entry\n' +
+    '5️⃣ Back to Main Menu\n\n' +
+    'Choose a number (1-5):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response === ui.Button.OK) {
+    const choice = ui.prompt('Enter choice (1-5):').getResponseText();
+    
+    switch(choice) {
+      case '1':
+        importPDFFromDrive();
+        break;
+      case '2':
+        importCSVFromDrive();
+        break;
+      case '3':
+        processRecentEmails();
+        break;
+      case '4':
+        showManualTransactionEntry();
+        break;
+      case '5':
+        showMainMenu();
+        break;
+      default:
+        ui.alert('❌ Invalid choice. Please try again.');
+        showImportMenu();
+    }
+  }
+}
+
+/**
+ * 📄 Import PDF Statement from Google Drive
+ */
+function importPDFFromDrive() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Get PDF file ID from user
+  const fileIdResponse = ui.prompt(
+    '📄 PDF Import',
+    '📋 Instructions:\n' +
+    '1. Upload your PDF bank statement to Google Drive\n' +
+    '2. Open the file and copy the File ID from the URL\n' +
+    '3. Paste the File ID below\n\n' +
+    'File ID:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (fileIdResponse.getSelectedButton() === ui.Button.OK) {
+    const fileId = fileIdResponse.getResponseText().trim();
+    
+    if (!fileId) {
+      ui.alert('❌ No File ID provided. Please try again.');
+      return;
+    }
+    
+    // Get account name
+    const accountResponse = ui.prompt(
+      '🏦 Account Selection',
+      '💳 Enter the account name for this statement:\n\n' +
+      'Examples:\n' +
+      '• PC Financial Checking\n' +
+      '• CIBC Aventura\n' +
+      '• RBC Savings\n\n' +
+      'Account Name:',
+      ui.ButtonSet.OK_CANCEL
+    );
+    
+    if (accountResponse.getSelectedButton() === ui.Button.OK) {
+      const accountName = accountResponse.getResponseText().trim();
+      
+      if (!accountName) {
+        ui.alert('❌ No account name provided. Please try again.');
+        return;
+      }
+      
+      try {
+        ui.alert('⏳ Processing PDF statement... This may take a moment.');
+        
+        const file = DriveApp.getFileById(fileId);
+        const pdfBlob = file.getBlob();
+        
+        const result = processPDFStatement(pdfBlob, accountName);
+        
+        ui.alert(
+          '✅ PDF Import Complete!',
+          `📊 Statement processed successfully!\n\n` +
+          `🏦 Account: ${accountName}\n` +
+          `📄 File: ${file.getName()}\n\n` +
+          'Check the Transactions sheet for imported data.',
+          ui.ButtonSet.OK
+        );
+        
+      } catch (error) {
+        ui.alert(
+          '❌ Import Failed',
+          `🚨 Error processing PDF:\n\n${error.message}\n\n` +
+          'Please check:\n' +
+          '• File ID is correct\n' +
+          '• File is a valid PDF\n' +
+          '• You have access to the file',
+          ui.ButtonSet.OK
+        );
+      }
+    }
+  }
+}
+
+/**
+ * 📊 CSV Import from Google Drive
+ */
+function importCSVFromDrive() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const fileIdResponse = ui.prompt(
+    '📊 CSV Import',
+    '📋 Instructions:\n' +
+    '1. Upload your CSV file to Google Drive\n' +
+    '2. Copy the File ID from the URL\n' +
+    '3. Paste it below\n\n' +
+    'File ID:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (fileIdResponse.getSelectedButton() === ui.Button.OK) {
+    const fileId = fileIdResponse.getResponseText().trim();
+    
+    try {
+      const file = DriveApp.getFileById(fileId);
+      const csvBlob = file.getBlob();
+      
+      ui.alert('⏳ Processing CSV file...');
+      
+      const result = processCSVStatement(csvBlob);
+      
+      ui.alert(
+        '✅ CSV Import Complete!',
+        `📊 CSV file processed successfully!\n\n` +
+        `📄 File: ${file.getName()}\n\n` +
+        'Check the CSV_Import and Transactions sheets.',
+        ui.ButtonSet.OK
+      );
+      
+    } catch (error) {
+      ui.alert(
+        '❌ Import Failed',
+        `🚨 Error processing CSV:\n\n${error.message}`,
+        ui.ButtonSet.OK
+      );
+    }
+  }
+}
+
+/**
+ * 📧 Process Recent Bank Emails
+ */
+function processRecentEmails() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '📧 Email Processing',
+    '📬 Process recent bank emails?\n\n' +
+    'This will scan for:\n' +
+    '• Bank notifications\n' +
+    '• PayPal transactions\n' +
+    '• Credit card alerts\n' +
+    '• Transfer confirmations\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    try {
+      ui.alert('⏳ Processing emails... This may take a few minutes.');
+      
+      processRecentBankEmails();
+      
+      ui.alert(
+        '✅ Email Processing Complete!',
+        '📧 Recent bank emails have been processed.\n\n' +
+        'Check the Dashboard for import summary.',
+        ui.ButtonSet.OK
+      );
+      
+    } catch (error) {
+      ui.alert(
+        '❌ Processing Failed',
+        `🚨 Error processing emails:\n\n${error.message}`,
+        ui.ButtonSet.OK
+      );
+    }
+  }
+}
+
+/**
+ * ✏️ Manual Transaction Entry
+ */
+function showManualTransactionEntry() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Get transaction details
+  const dateResponse = ui.prompt(
+    '📅 Transaction Date',
+    'Enter date (YYYY-MM-DD format):\n\nExample: 2024-08-21',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (dateResponse.getSelectedButton() !== ui.Button.OK) return;
+  
+  const amountResponse = ui.prompt(
+    '💰 Transaction Amount',
+    'Enter amount (positive for income, negative for expense):\n\nExamples: -25.50, 1500.00',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (amountResponse.getSelectedButton() !== ui.Button.OK) return;
+  
+  const descResponse = ui.prompt(
+    '📝 Description',
+    'Enter transaction description:\n\nExample: Grocery Store - Metro',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (descResponse.getSelectedButton() !== ui.Button.OK) return;
+  
+  const accountResponse = ui.prompt(
+    '🏦 Account',
+    'Enter account name:\n\nExample: PC Financial Checking',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (accountResponse.getSelectedButton() !== ui.Button.OK) return;
+  
+  try {
+    const transaction = {
+      date: new Date(dateResponse.getResponseText()),
+      amount: parseFloat(amountResponse.getResponseText()),
+      description: descResponse.getResponseText(),
+      type: parseFloat(amountResponse.getResponseText()) > 0 ? 'Income' : 'Expense'
+    };
+    
+    _addTransactionToSheet(transaction, accountResponse.getResponseText());
+    
+    ui.alert(
+      '✅ Transaction Added!',
+      `💰 Transaction successfully added:\n\n` +
+      `📅 Date: ${transaction.date.toDateString()}\n` +
+      `💵 Amount: $${transaction.amount}\n` +
+      `📝 Description: ${transaction.description}\n` +
+      `🏦 Account: ${accountResponse.getResponseText()}`,
+      ui.ButtonSet.OK
+    );
+    
+  } catch (error) {
+    ui.alert(
+      '❌ Entry Failed',
+      `🚨 Error adding transaction:\n\n${error.message}`,
+      ui.ButtonSet.OK
+    );
+  }
+}
+
+/**
+ * 🗂️ Sheet Management Menu
+ */
+function showSheetManagementMenu() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '🗂️ Sheet Management Menu',
+    '🧹 Choose management action:\n\n' +
+    '1️⃣ View Current Sheets\n' +
+    '2️⃣ Delete Legacy/Unused Sheets\n' +
+    '3️⃣ Clean Up Data\n' +
+    '4️⃣ Backup Current Data\n' +
+    '5️⃣ Back to Main Menu\n\n' +
+    'Choose a number (1-5):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response === ui.Button.OK) {
+    const choice = ui.prompt('Enter choice (1-5):').getResponseText();
+    
+    switch(choice) {
+      case '1':
+        showCurrentSheets();
+        break;
+      case '2':
+        showDeleteSheetsMenu();
+        break;
+      case '3':
+        showCleanupMenu();
+        break;
+      case '4':
+        createBackup();
+        break;
+      case '5':
+        showMainMenu();
+        break;
+      default:
+        ui.alert('❌ Invalid choice. Please try again.');
+        showSheetManagementMenu();
+    }
+  }
+}
+
+/**
+ * 👀 Show Current Sheets
+ */
+function showCurrentSheets() {
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheets = ss.getSheets();
+  
+  let sheetInfo = '📊 Current Sheets:\n\n';
+  
+  sheets.forEach((sheet, index) => {
+    const name = sheet.getName();
+    const rows = sheet.getLastRow();
+    const status = _getSheetStatus(name);
+    
+    sheetInfo += `${index + 1}. ${name} (${rows} rows) ${status}\n`;
+  });
+  
+  sheetInfo += '\n🟢 = Essential  🟡 = Optional  🔴 = Can Delete';
+  
+  ui.alert('📋 Sheet Overview', sheetInfo, ui.ButtonSet.OK);
+  showSheetManagementMenu();
+}
+
+/**
+ * 🗑️ Delete Sheets Menu
+ */
+function showDeleteSheetsMenu() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '🗑️ Delete Legacy Sheets',
+    '⚠️ This will delete unused/legacy sheets:\n\n' +
+    '🔴 NetWorthHistory (integrated into Dashboard)\n' +
+    '🔴 Old diagnostic sheets (if Diagnostic_Hub exists)\n' +
+    '🔴 Empty or test sheets\n\n' +
+    '✅ Essential sheets will be preserved\n\n' +
+    'Continue with cleanup?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    try {
+      const deleted = cleanupLegacySheets();
+      
+      ui.alert(
+        '✅ Cleanup Complete!',
+        `🗑️ Deleted ${deleted.length} legacy sheets:\n\n` +
+        deleted.join('\n') + '\n\n' +
+        'Your essential data remains safe.',
+        ui.ButtonSet.OK
+      );
+      
+    } catch (error) {
+      ui.alert(
+        '❌ Cleanup Failed',
+        `🚨 Error during cleanup:\n\n${error.message}`,
+        ui.ButtonSet.OK
+      );
+    }
+  }
+}
+
+/**
+ * 🧹 Data Cleanup Menu
+ */
+function showCleanupMenu() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '🧹 Data Cleanup Options',
+    '🔧 Choose cleanup action:\n\n' +
+    '1️⃣ Remove Duplicate Transactions\n' +
+    '2️⃣ Fix Data Formatting\n' +
+    '3️⃣ Update Categories\n' +
+    '4️⃣ Archive Old Data\n' +
+    '5️⃣ Back to Sheet Management\n\n' +
+    'Choose a number (1-5):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response === ui.Button.OK) {
+    const choice = ui.prompt('Enter choice (1-5):').getResponseText();
+    
+    switch(choice) {
+      case '1':
+        removeDuplicateTransactions();
+        break;
+      case '2':
+        fixDataFormatting();
+        break;
+      case '3':
+        updateAllCategories();
+        break;
+      case '4':
+        archiveOldData();
+        break;
+      case '5':
+        showSheetManagementMenu();
+        break;
+      default:
+        ui.alert('❌ Invalid choice. Please try again.');
+        showCleanupMenu();
+    }
+  }
+}
+
+/**
+ * 📈 Analysis & Reports Menu
+ */
+function showAnalysisMenu() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '📈 Analysis & Reports Menu',
+    '📊 Choose analysis type:\n\n' +
+    '1️⃣ Generate Monthly Report\n' +
+    '2️⃣ Category Spending Analysis\n' +
+    '3️⃣ Account Balance Summary\n' +
+    '4️⃣ Investment Performance\n' +
+    '5️⃣ Update Dashboard\n' +
+    '6️⃣ Back to Main Menu\n\n' +
+    'Choose a number (1-6):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response === ui.Button.OK) {
+    const choice = ui.prompt('Enter choice (1-6):').getResponseText();
+    
+    switch(choice) {
+      case '1':
+        generateMonthlyReport();
+        break;
+      case '2':
+        analyzeCategorySpending();
+        break;
+      case '3':
+        generateAccountSummary();
+        break;
+      case '4':
+        analyzeInvestmentPerformance();
+        break;
+      case '5':
+        updateDashboard();
+        break;
+      case '6':
+        showMainMenu();
+        break;
+      default:
+        ui.alert('❌ Invalid choice. Please try again.');
+        showAnalysisMenu();
+    }
+  }
+}
+
+/**
+ * 🏥 System Health Check Menu
+ */
+function showHealthCheckMenu() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '🏥 System Health Check',
+    '🔍 Run comprehensive system check?\n\n' +
+    'This will analyze:\n' +
+    '• Data integrity\n' +
+    '• Sheet structure\n' +
+    '• Performance issues\n' +
+    '• Error patterns\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    try {
+      ui.alert('⏳ Running health check... Please wait.');
+      
+      const healthReport = runSystemHealthCheck();
+      
+      ui.alert(
+        '🏥 Health Check Complete!',
+        healthReport,
+        ui.ButtonSet.OK
+      );
+      
+    } catch (error) {
+      ui.alert(
+        '❌ Health Check Failed',
+        `🚨 Error during health check:\n\n${error.message}`,
+        ui.ButtonSet.OK
+      );
+    }
+  }
+}
+
+/**
+ * 🔧 Advanced Tools Menu
+ */
+function showAdvancedToolsMenu() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    '🔧 Advanced Tools Menu',
+    '⚙️ Choose advanced tool:\n\n' +
+    '1️⃣ Run Diagnostic Analysis\n' +
+    '2️⃣ Export Data\n' +
+    '3️⃣ Import Configuration\n' +
+    '4️⃣ Reset Learning Data\n' +
+    '5️⃣ Test Email Processing\n' +
+    '6️⃣ Back to Main Menu\n\n' +
+    'Choose a number (1-6):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response === ui.Button.OK) {
+    const choice = ui.prompt('Enter choice (1-6):').getResponseText();
+    
+    switch(choice) {
+      case '1':
+        runConsolidatedAnalysis();
+        ui.alert('✅ Diagnostic analysis complete! Check Diagnostic_Hub sheet.');
+        break;
+      case '2':
+        exportAllData();
+        break;
+      case '3':
+        importConfiguration();
+        break;
+      case '4':
+        resetLearningData();
+        break;
+      case '5':
+        testEmailProcessing();
+        break;
+      case '6':
+        showMainMenu();
+        break;
+      default:
+        ui.alert('❌ Invalid choice. Please try again.');
+        showAdvancedToolsMenu();
+    }
+  }
+}
+
+// ============================================================================
+// 🛠️ Helper Functions for Menu System
+// ============================================================================
+
+/**
+ * Get status indicator for sheet
+ */
+function _getSheetStatus(sheetName) {
+  const essential = ['Transactions', 'Accounts', 'Categories', 'Dashboard'];
+  const optional = ['Holdings', 'Staging', 'CSV_Import'];
+  const deletable = ['NetWorthHistory', 'Learning_Hub', 'Failed_Parsing', 'AuditLog'];
+  
+  if (essential.includes(sheetName)) return '🟢';
+  if (optional.includes(sheetName)) return '🟡';
+  if (deletable.includes(sheetName)) return '🔴';
+  return '❓';
+}
+
+/**
+ * Clean up legacy sheets safely
+ */
+function cleanupLegacySheets() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheets = ss.getSheets();
+  const deleted = [];
+  
+  const safeToDelete = [
+    'NetWorthHistory', // Legacy - integrated into Dashboard
+    'Old_Transactions', // If it exists
+    'Test_Sheet', // Test sheets
+    'Backup_', // Old backup sheets (starts with Backup_)
+  ];
+  
+  // Only delete if Diagnostic_Hub exists (meaning system is upgraded)
+  const diagnosticHub = ss.getSheetByName('Diagnostic_Hub');
+  if (diagnosticHub) {
+    safeToDelete.push('Learning_Hub', 'Failed_Parsing', 'AuditLog');
+  }
+  
+  for (const sheet of sheets) {
+    const name = sheet.getName();
+    
+    // Check if sheet is safe to delete
+    const shouldDelete = safeToDelete.some(pattern => 
+      name === pattern || name.startsWith(pattern)
+    );
+    
+    if (shouldDelete && sheets.length > 5) { // Keep minimum 5 sheets
+      try {
+        ss.deleteSheet(sheet);
+        deleted.push(name);
+      } catch (error) {
+        _logError(`Failed to delete sheet: ${name}`, error);
+      }
+    }
+  }
+  
+  return deleted;
+}
+
+/**
+ * Remove duplicate transactions
+ */
+function removeDuplicateTransactions() {
+  const ui = SpreadsheetApp.getUi();
+  
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const mainSheet = ss.getSheetByName('Transactions');
+    const data = mainSheet.getDataRange().getValues();
+    
+    const seen = new Set();
+    const duplicates = [];
+    
+    for (let i = 1; i < data.length; i++) { // Skip header
+      const row = data[i];
+      const fingerprint = `${row[0]}_${row[1]}_${row[2]}_${row[3]}`; // Date_Amount_From_To
+      
+      if (seen.has(fingerprint)) {
+        duplicates.push(i + 1); // Sheet rows are 1-indexed
+      } else {
+        seen.add(fingerprint);
+      }
+    }
+    
+    if (duplicates.length > 0) {
+      const confirm = ui.alert(
+        '🔍 Duplicates Found',
+        `Found ${duplicates.length} duplicate transactions.\n\nDelete them?`,
+        ui.ButtonSet.YES_NO
+      );
+      
+      if (confirm === ui.Button.YES) {
+        // Delete from bottom to top to maintain row indices
+        duplicates.reverse().forEach(rowIndex => {
+          mainSheet.deleteRow(rowIndex);
+        });
+        
+        ui.alert(`✅ Removed ${duplicates.length} duplicate transactions.`);
+      }
+    } else {
+      ui.alert('✅ No duplicate transactions found.');
+    }
+    
+  } catch (error) {
+    ui.alert(`❌ Error removing duplicates: ${error.message}`);
+  }
+}
+
+/**
+ * Run comprehensive system health check
+ */
+function runSystemHealthCheck() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheets = ss.getSheets();
+  
+  let report = '🏥 SYSTEM HEALTH REPORT\n\n';
+  
+  // Check essential sheets
+  const essential = ['Transactions', 'Accounts', 'Categories', 'Dashboard'];
+  const missing = essential.filter(name => !ss.getSheetByName(name));
+  
+  if (missing.length === 0) {
+    report += '✅ All essential sheets present\n';
+  } else {
+    report += `❌ Missing essential sheets: ${missing.join(', ')}\n`;
+  }
+  
+  // Check data integrity
+  const mainSheet = ss.getSheetByName('Transactions');
+  if (mainSheet) {
+    const lastRow = mainSheet.getLastRow();
+    report += `📊 Transaction count: ${lastRow - 1}\n`;
+    
+    // Check for empty cells in key columns
+    const data = mainSheet.getRange(2, 1, Math.min(lastRow - 1, 100), 4).getValues();
+    const emptyRows = data.filter(row => !row[0] || !row[1]).length;
+    
+    if (emptyRows === 0) {
+      report += '✅ Data integrity good\n';
+    } else {
+      report += `⚠️ Found ${emptyRows} rows with missing data\n`;
+    }
+  }
+  
+  // Check system performance
+  const totalSheets = sheets.length;
+  report += `📋 Total sheets: ${totalSheets}\n`;
+  
+  if (totalSheets > 15) {
+    report += '⚠️ Consider cleaning up unused sheets\n';
+  } else {
+    report += '✅ Sheet count optimal\n';
+  }
+  
+  // Check for diagnostic system
+  const diagnosticHub = ss.getSheetByName('Diagnostic_Hub');
+  if (diagnosticHub) {
+    report += '✅ Unified diagnostic system active\n';
+  } else {
+    report += '⚠️ Consider upgrading to unified diagnostic system\n';
+  }
+  
+  report += '\n🎯 Overall Status: System Healthy';
+  
+  return report;
+}
+
+/**
+ * Fix common data formatting issues
+ */
+function fixDataFormatting() {
+  const ui = SpreadsheetApp.getUi();
+  
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const mainSheet = ss.getSheetByName('Transactions');
+    
+    if (!mainSheet) {
+      ui.alert('❌ Transactions sheet not found.');
+      return;
+    }
+    
+    const lastRow = mainSheet.getLastRow();
+    if (lastRow <= 1) {
+      ui.alert('✅ No data to format.');
+      return;
+    }
+    
+    // Format date column
+    const dateRange = mainSheet.getRange(2, 1, lastRow - 1, 1);
+    dateRange.setNumberFormat('yyyy-mm-dd');
+    
+    // Format amount column
+    const amountRange = mainSheet.getRange(2, 2, lastRow - 1, 1);
+    amountRange.setNumberFormat('$#,##0.00');
+    
+    // Set text format for description columns
+    const textRange = mainSheet.getRange(2, 3, lastRow - 1, 3); // From, To, Notes
+    textRange.setNumberFormat('@');
+    
+    ui.alert('✅ Data formatting updated successfully!');
+    
+  } catch (error) {
+    ui.alert(`❌ Error fixing formatting: ${error.message}`);
+  }
+}
