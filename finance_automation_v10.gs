@@ -162,7 +162,7 @@ const CSV_PROFILES = [
   }
 ];
 
-// IMPROVED: Merchant-focused stopwords (avoiding generic banking terms)
+// Enhanced categorization with machine learning-like pattern recognition
 const CATEGORY_STOPWORDS = new Set([
   // Generic banking/system terms (should be excluded from categorization)
   'financial', 'cibc', 'amount', 'auto', 'logged', 'money', 'deposit', 'card', 
@@ -171,7 +171,8 @@ const CATEGORY_STOPWORDS = new Set([
   'payment', 'etransfer', 'transaction', 'statement', 'balance', 'online', 
   'account', 'fee', 'service', 'interest', 'dividend', 'confirmation', 
   'receipt', 'monthly', 'annual', 'quarterly', 'processed', 'paid', 'paym', 
-  'withdrawal', 'debit', 'aventura', 'wealthsimple', 'streiffer',
+  'withdrawal', 'debit', 'aventura', 'wealthsimple', 'streiffer', 'pad',
+  'standalone', 'youve', 'from', 'streiffer',
   
   // Generic corporate terms
   'inc', 'ltd', 'corp', 'limited', 'llc', 'co', 'company', 'group', 'enterprises',
@@ -182,16 +183,53 @@ const CATEGORY_STOPWORDS = new Set([
   'will', 'would', 'should', 'could', 'when', 'where', 'what', 'which', 'who', 'whom'
 ]);
 
-// ENHANCED: Merchant pattern recognition for better categorization
-const MERCHANT_PATTERNS = {
-  'grocery': /sobeys|loblaws|metro|walmart|costco|food basics|no frills|superstore/i,
-  'gas': /shell|esso|petro|husky|canadian tire gas|circle k|7-eleven/i,
-  'restaurant': /mcdonalds|tim hortons|subway|pizza|restaurant|cafe|bistro|grill|diner/i,
-  'shopping': /amazon|ebay|walmart|target|best buy|canadian tire|home depot|lowe/i,
-  'pharmacy': /shoppers drug mart|rexall|pharmacy|cvs|walgreens/i,
-  'entertainment': /cineplex|netflix|spotify|disney|apple music|xbox|playstation/i,
-  'transport': /uber|lyft|taxi|ttc|go transit|via rail|air canada|westjet/i,
-  'utilities': /hydro|gas|water|electricity|bell|rogers|telus|internet|phone/i
+// Enhanced merchant pattern recognition with confidence scoring
+const ENHANCED_MERCHANT_PATTERNS = {
+  'grocery': {
+    patterns: [/sobeys|loblaws|metro|walmart|costco|food basics|no frills|superstore|freshco|farm boy/i],
+    confidence: 0.95,
+    keywords: ['grocery', 'food', 'supermarket']
+  },
+  'gas': {
+    patterns: [/shell|esso|petro|husky|canadian tire gas|circle k|7-eleven|ultramar|pioneer/i],
+    confidence: 0.9,
+    keywords: ['gas', 'fuel', 'station']
+  },
+  'restaurant': {
+    patterns: [/mcdonalds|tim hortons|subway|pizza|restaurant|cafe|bistro|grill|diner|starbucks|a&w|kfc|taco bell/i],
+    confidence: 0.85,
+    keywords: ['restaurant', 'food', 'dining']
+  },
+  'shopping': {
+    patterns: [/amazon|ebay|walmart|target|best buy|canadian tire|home depot|lowe|costco|winners|marshalls/i],
+    confidence: 0.8,
+    keywords: ['shopping', 'retail', 'store']
+  },
+  'pharmacy': {
+    patterns: [/shoppers drug mart|rexall|pharmacy|cvs|walgreens|pharmasave/i],
+    confidence: 0.9,
+    keywords: ['pharmacy', 'health', 'medicine']
+  },
+  'entertainment': {
+    patterns: [/cineplex|netflix|spotify|disney|apple music|xbox|playstation|steam|epic games/i],
+    confidence: 0.85,
+    keywords: ['entertainment', 'streaming', 'gaming']
+  },
+  'transport': {
+    patterns: [/uber|lyft|taxi|ttc|go transit|via rail|air canada|westjet|presto/i],
+    confidence: 0.9,
+    keywords: ['transport', 'travel', 'transit']
+  },
+  'utilities': {
+    patterns: [/hydro|gas|water|electricity|bell|rogers|telus|internet|phone|enbridge/i],
+    confidence: 0.95,
+    keywords: ['utilities', 'bills', 'services']
+  },
+  'investment': {
+    patterns: [/wealthsimple|questrade|td direct|rbc direct|cibc investor/i],
+    confidence: 0.98,
+    keywords: ['investment', 'trading', 'portfolio']
+  }
 };
 
 // ===================== UTILITY FUNCTIONS =====================
@@ -1334,6 +1372,7 @@ function _stageTransaction(transaction, stagingSheet) {
   }
 }
 
+// Enhanced transaction categorization with dashboard integration
 function _commitTransaction(transaction, mainSheet, accountsSheet) {
   try {
     // Check for duplicates
@@ -1342,18 +1381,23 @@ function _commitTransaction(transaction, mainSheet, accountsSheet) {
       return;
     }
     
+    // Auto-categorize transaction using enhanced system
+    const category = _categorizeTransaction(transaction);
+    transaction.category = category;
+    
     const amount = transaction.amount || 0;
     const row = [
       transaction.date || new Date(), amount, transaction.fromAccount || '', transaction.toAccount || '',
       transaction.bank || '', transaction.notes || '', transaction.emailId || `AUTO-${Date.now()}`,
-      transaction.category || '', transaction.type || '', transaction.fingerprint || _generateFingerprint(transaction)
+      category, transaction.type || '', transaction.fingerprint || _generateFingerprint(transaction)
     ];
     
     mainSheet.appendRow(row);
     _updateAccountBalances(transaction, accountsSheet);
     
     _logInfo(`Committed transaction: ${transaction.emailId}`, {
-      amount: transaction.amount, from: transaction.fromAccount, to: transaction.toAccount, type: transaction.type
+      amount: transaction.amount, from: transaction.fromAccount, to: transaction.toAccount, 
+      type: transaction.type, category: category
     });
     
   } catch (error) {
@@ -1872,17 +1916,32 @@ function _categorizeTransaction(transaction) {
       transaction.fromAccount || ''
     ].join(' '));
     
-    // First check for specific merchant patterns (avoiding generic banking terms)
-    for (const [category, patterns] of Object.entries(MERCHANT_PATTERNS)) {
-      for (const pattern of patterns) {
-        if (searchText.includes(_lc(pattern))) {
-          // Additional validation to avoid generic banking terms
-          if (!_containsGenericBankingTerms(pattern)) {
-            _logInfo(`Categorized as ${category} (merchant: ${pattern})`);
-            return category;
+    // First check learned categories from Categories sheet
+    const learnedCategory = _getLearnedCategory(transaction);
+    if (learnedCategory) {
+      _logInfo(`Used learned category for transaction: ${learnedCategory}`);
+      return learnedCategory;
+    }
+    
+    // Enhanced merchant pattern matching with confidence scoring
+    let bestMatch = null;
+    let bestConfidence = 0;
+    
+    for (const [category, config] of Object.entries(ENHANCED_MERCHANT_PATTERNS)) {
+      for (const pattern of config.patterns) {
+        if (pattern.test(searchText)) {
+          const confidence = config.confidence;
+          if (confidence > bestConfidence) {
+            bestMatch = category;
+            bestConfidence = confidence;
           }
         }
       }
+    }
+    
+    if (bestMatch && bestConfidence >= 0.8) {
+      _logInfo(`Categorized as ${bestMatch} (confidence: ${bestConfidence})`);
+      return bestMatch;
     }
     
     // Enhanced transaction type detection
@@ -1925,56 +1984,360 @@ function _categorizeTransaction(transaction) {
   }
 }
 
-function _containsGenericBankingTerms(text) {
-  const genericTerms = ['card', 'aventura', 'account', 'banking', 'transaction', 'payment', 'deposit'];
-  const lowerText = _lc(text);
-  
-  return genericTerms.some(term => lowerText === term || 
-    (lowerText.length <= 8 && lowerText.includes(term)));
-}
-
-function _learnCategoryFromHistory(transaction, categoriesSheet) {
+function _getLearnedCategory(transaction) {
   try {
-    if (!categoriesSheet || !transaction.toAccount) return null;
+    const ss = _ss();
+    const categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
     
-    const merchant = _extractMerchantName(transaction.toAccount);
+    if (!categoriesSheet || categoriesSheet.getLastRow() < 2) {
+      return null;
+    }
+    
+    const merchant = _extractCleanMerchantName(transaction.toAccount);
     if (!merchant || merchant.length < 3) return null;
     
-    // Check if we have this merchant in our learning database
-    const data = categoriesSheet.getRange(2, 1, Math.max(1, categoriesSheet.getLastRow() - 1), 3).getValues();
+    const data = categoriesSheet.getRange(2, 1, categoriesSheet.getLastRow() - 1, 2).getValues();
     
     for (const row of data) {
       const storedMerchant = _lc(row[0] || '');
       const category = row[1] || '';
-      const confidence = parseFloat(row[2] || 0);
       
-      if (storedMerchant === _lc(merchant) && confidence >= 0.8) {
-        _logInfo(`Learned category for ${merchant}: ${category} (confidence: ${confidence})`);
+      if (storedMerchant === _lc(merchant)) {
+        return category;
+      }
+      
+      // Partial matching for similar merchant names
+      if (merchant.length > 5 && (storedMerchant.includes(_lc(merchant)) || _lc(merchant).includes(storedMerchant))) {
         return category;
       }
     }
     
     return null;
   } catch (error) {
-    _logError('Failed to learn category from history', error);
+    _logError('Failed to get learned category', error);
     return null;
   }
 }
 
-function _extractMerchantName(toAccount) {
+function _extractCleanMerchantName(toAccount) {
   if (!toAccount) return '';
   
-  const merchant = toAccount
-    .replace(/[0-9]{4,}/g, '') // Remove long numbers
-    .replace(/\b(card|aventura|payment|purchase|pos|debit|credit)\b/gi, '') // Remove banking terms
+  let merchant = toAccount.toLowerCase()
+    .replace(/[0-9]{4,}/g, '') // Remove long numbers (card numbers, transaction IDs)
+    .replace(/\b(card|aventura|payment|purchase|pos|debit|credit|transaction|interac)\b/gi, '') // Remove banking terms
     .replace(/[^a-zA-Z\s]/g, ' ') // Replace non-letters with spaces
     .replace(/\s+/g, ' ') // Normalize spaces
     .trim();
   
-  return merchant.length > 2 ? merchant : '';
+  // Remove stop words
+  const words = merchant.split(' ').filter(word => {
+    return word.length > 2 && !CATEGORY_STOPWORDS.has(word.toLowerCase());
+  });
+  
+  return words.join(' ').trim();
 }
 
-// ===================== DASHBOARD & ANALYSIS =====================
+function _learnCategoriesFromTransactions() {
+  try {
+    _logInfo('Starting enhanced category learning process...');
+    
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    
+    if (!mainSheet || !categoriesSheet) {
+      _logError('Required sheets not found for category learning');
+      return;
+    }
+    
+    // Get all transactions
+    const lastRow = mainSheet.getLastRow();
+    if (lastRow < 2) {
+      _logInfo('No transactions found for category learning');
+      return;
+    }
+    
+    const data = mainSheet.getRange(2, 1, lastRow - 1, Math.max(mainSheet.getLastColumn(), 10)).getValues();
+    const merchantAnalysis = {};
+    
+    // Analyze transaction patterns
+    for (const row of data) {
+      if (!row || row.length === 0) continue;
+      
+      const toAccount = row[3] || ''; // Column D: To Account  
+      const category = row[7] || ''; // Column H: Category
+      const amount = Math.abs(parseFloat(row[1] || 0)); // Column B: Amount
+      
+      if (!toAccount || !category || category === 'Uncategorized') continue;
+      
+      const merchant = _extractCleanMerchantName(toAccount);
+      if (!merchant || merchant.length < 3) continue;
+      
+      const merchantKey = merchant.toLowerCase();
+      
+      if (!merchantAnalysis[merchantKey]) {
+        merchantAnalysis[merchantKey] = {
+          originalName: merchant,
+          categories: {},
+          totalTransactions: 0,
+          totalAmount: 0,
+          firstSeen: new Date(row[0] || new Date()),
+          lastSeen: new Date(row[0] || new Date())
+        };
+      }
+      
+      const analysis = merchantAnalysis[merchantKey];
+      analysis.categories[category] = (analysis.categories[category] || 0) + 1;
+      analysis.totalTransactions++;
+      analysis.totalAmount += amount;
+      
+      const transactionDate = new Date(row[0] || new Date());
+      if (transactionDate < analysis.firstSeen) analysis.firstSeen = transactionDate;
+      if (transactionDate > analysis.lastSeen) analysis.lastSeen = transactionDate;
+    }
+    
+    // Get existing category mappings
+    const existingMappings = new Set();
+    if (categoriesSheet.getLastRow() > 1) {
+      const existingData = categoriesSheet.getRange(2, 1, categoriesSheet.getLastRow() - 1, 2).getValues();
+      existingData.forEach(row => {
+        if (row[0]) existingMappings.add(row[0].toLowerCase());
+      });
+    }
+    
+    // Create smart recommendations
+    const recommendations = [];
+    
+    for (const [merchantKey, analysis] of Object.entries(merchantAnalysis)) {
+      if (existingMappings.has(merchantKey)) continue;
+      
+      // Calculate confidence metrics
+      const dominantCategory = Object.entries(analysis.categories)
+        .reduce((a, b) => analysis.categories[a[0]] > analysis.categories[b[0]] ? a : b);
+      
+      const confidence = dominantCategory[1] / analysis.totalTransactions;
+      const frequency = analysis.totalTransactions;
+      const recency = (new Date() - analysis.lastSeen) / (1000 * 60 * 60 * 24); // days ago
+      
+      // Only recommend if high confidence and sufficient data
+      if (confidence >= 0.7 && frequency >= 2) {
+        const score = confidence * Math.log(frequency + 1) * Math.max(0.1, 1 - recency / 365);
+        
+        recommendations.push({
+          merchant: analysis.originalName,
+          category: dominantCategory[0],
+          confidence: confidence,
+          frequency: frequency,
+          score: score,
+          recency: recency
+        });
+      }
+    }
+    
+    // Sort by score and add top recommendations
+    recommendations.sort((a, b) => b.score - a.score);
+    
+    let addedCount = 0;
+    const maxRecommendations = 20; // Limit to avoid spam
+    
+    for (let i = 0; i < Math.min(recommendations.length, maxRecommendations); i++) {
+      const rec = recommendations[i];
+      categoriesSheet.appendRow([rec.merchant, rec.category]);
+      addedCount++;
+      
+      _logInfo(`Added category mapping: ${rec.merchant} → ${rec.category} (confidence: ${(rec.confidence * 100).toFixed(1)}%, frequency: ${rec.frequency})`);
+    }
+    
+    // Update all uncategorized transactions with new mappings
+    _applyCategoryMappingsToTransactions();
+    
+    if (addedCount > 0) {
+      _logInfo(`Enhanced category learning completed: ${addedCount} new intelligent mappings added`);
+      try { 
+        SpreadsheetApp.getUi().alert(
+          'Category Learning Complete', 
+          `Added ${addedCount} new intelligent category mappings based on transaction patterns.\n\n` +
+          `Total recommendations analyzed: ${recommendations.length}\n` +
+          `Applied to existing uncategorized transactions.`,
+          SpreadsheetApp.getUi().ButtonSet.OK
+        ); 
+      } catch (e) {}
+    } else {
+      _logInfo('Enhanced category learning completed: no new mappings needed');
+      try { 
+        SpreadsheetApp.getUi().alert(
+          'Category Learning Complete',
+          'No new category mappings needed.\nAll merchants are already categorized or have insufficient data.',
+          SpreadsheetApp.getUi().ButtonSet.OK
+        ); 
+      } catch (e) {}
+    }
+    
+  } catch (error) {
+    _logError('Failed to learn categories', error);
+    try { 
+      SpreadsheetApp.getUi().alert('Category learning failed: ' + error.message); 
+    } catch (e) {}
+  }
+}
+
+function _applyCategoryMappingsToTransactions() {
+  try {
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    
+    if (!mainSheet || mainSheet.getLastRow() < 2) return;
+    
+    const data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, Math.max(mainSheet.getLastColumn(), 10)).getValues();
+    let updatedCount = 0;
+    
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      if (!row || row.length === 0) continue;
+      
+      const currentCategory = row[7] || ''; // Column H: Category
+      
+      if (currentCategory === 'Uncategorized' || !currentCategory) {
+        const transaction = {
+          toAccount: row[3] || '', // Column D: To Account
+          fromAccount: row[2] || '', // Column C: From Account
+          notes: row[5] || '', // Column F: Notes
+          amount: row[1] || 0 // Column B: Amount
+        };
+        
+        const newCategory = _categorizeTransaction(transaction);
+        
+        if (newCategory !== 'Uncategorized') {
+          mainSheet.getRange(i + 2, 8).setValue(newCategory); // Column H: Category
+          updatedCount++;
+        }
+      }
+    }
+    
+    if (updatedCount > 0) {
+      _logInfo(`Applied new category mappings to ${updatedCount} existing transactions`);
+    }
+    
+  } catch (error) {
+    _logError('Failed to apply category mappings to transactions', error);
+  }
+}
+
+function _updateNetWorth() {
+  try {
+    _logInfo('Updating net worth calculation...');
+    
+    const ss = _ss();
+    const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    const netWorthSheet = ss.getSheetByName(SHEET_NAMES.NETWORTH);
+    
+    if (!netWorthSheet) {
+      _logError('NetWorthHistory sheet not found');
+      return;
+    }
+    
+    // Calculate total account balances
+    let totalCash = 0;
+    if (accountsSheet && accountsSheet.getLastRow() > 1) {
+      const accountData = accountsSheet.getRange(2, 1, accountsSheet.getLastRow() - 1, 3).getValues();
+      
+      for (const row of accountData) {
+        const balance = parseFloat(row[1] || 0); // Column B: Balance
+        const accountType = _lc(row[2] || ''); // Column C: Account Type
+        
+        // Only count positive balances (assets) and exclude credit card debt
+        if (balance > 0 && !accountType.includes('credit')) {
+          totalCash += balance;
+        }
+      }
+    }
+    
+    // Calculate total investment value
+    let totalInvestments = 0;
+    if (holdingsSheet && holdingsSheet.getLastRow() > 1) {
+      const holdingsData = holdingsSheet.getRange(2, 1, holdingsSheet.getLastRow() - 1, 6).getValues();
+      
+      for (const row of holdingsData) {
+        const currentValue = parseFloat(row[4] || 0); // Column E: Total Value (CAD)
+        if (currentValue > 0) {
+          totalInvestments += currentValue;
+        }
+      }
+    }
+    
+    // Calculate total liabilities (credit card debt)
+    let totalLiabilities = 0;
+    if (accountsSheet && accountsSheet.getLastRow() > 1) {
+      const accountData = accountsSheet.getRange(2, 1, accountsSheet.getLastRow() - 1, 3).getValues();
+      
+      for (const row of accountData) {
+        const balance = parseFloat(row[1] || 0); // Column B: Balance
+        const accountType = _lc(row[2] || ''); // Column C: Account Type
+        
+        // Credit card balances are negative (debt)
+        if (balance < 0 || accountType.includes('credit')) {
+          totalLiabilities += Math.abs(balance);
+        }
+      }
+    }
+    
+    const netWorth = totalCash + totalInvestments - totalLiabilities;
+    const today = new Date();
+    
+    // Add entry to net worth history
+    netWorthSheet.appendRow([
+      today,
+      totalCash,
+      totalInvestments,
+      totalLiabilities,
+      netWorth,
+      `Cash: $${totalCash.toFixed(2)}, Investments: $${totalInvestments.toFixed(2)}, Debt: $${totalLiabilities.toFixed(2)}`
+    ]);
+    
+    _logInfo(`Net worth updated: $${netWorth.toFixed(2)}`, {
+      cash: totalCash.toFixed(2),
+      investments: totalInvestments.toFixed(2),
+      liabilities: totalLiabilities.toFixed(2)
+    });
+    
+    try {
+      SpreadsheetApp.getUi().alert(
+        'Net Worth Updated',
+        `Net Worth: $${netWorth.toFixed(2)}\n\n` +
+        `Cash & Accounts: $${totalCash.toFixed(2)}\n` +
+        `Investments: $${totalInvestments.toFixed(2)}\n` +
+        `Liabilities: $${totalLiabilities.toFixed(2)}\n\n` +
+        `Data added to NetWorthHistory sheet.`,
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+    } catch (e) {}
+    
+  } catch (error) {
+    _logError('Failed to update net worth', error);
+    try {
+      SpreadsheetApp.getUi().alert('Net worth update failed: ' + error.message);
+    } catch (e) {}
+  }
+}
+
+function _learnCategoryFromHistory(transaction, categoriesSheet) {
+  // This function is deprecated - use _getLearnedCategory instead
+  return _getLearnedCategory(transaction);
+}
+
+function _extractMerchantName(toAccount) {
+  // This function is deprecated - use _extractCleanMerchantName instead
+  return _extractCleanMerchantName(toAccount);
+}
+
+function _containsGenericBankingTerms(text) {
+  const lowerText = _lc(text);
+  return CATEGORY_STOPWORDS.has(lowerText) || 
+         (lowerText.length <= 8 && Array.from(CATEGORY_STOPWORDS).some(term => lowerText.includes(term)));
+}
+
+// ===================== ENHANCED DASHBOARD & ANALYSIS =====================
 
 function _updateDashboard() {
   try {
@@ -1983,6 +2346,7 @@ function _updateDashboard() {
     const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
     const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
     const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    const categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
     
     if (!dashboardSheet) {
       _logError('Dashboard sheet not found');
@@ -2006,23 +2370,70 @@ function _updateDashboard() {
     // Get investment portfolio value
     const portfolioValue = _getPortfolioValue(holdingsSheet);
     
+    // Get category learning statistics
+    const categoryStats = _getCategoryLearningStats(categoriesSheet, mainSheet);
+    
     // Update dashboard with calculated values
     _writeDashboardSummary(dashboardSheet, {
       totalExpenses: expenseBreakdown.total,
       categoryBreakdown: expenseBreakdown.categories,
       accountBalances: accountBalances,
       portfolioValue: portfolioValue,
+      categoryStats: categoryStats,
       lastUpdated: now
     });
     
-    _logInfo('Dashboard updated successfully', {
+    _logInfo('Enhanced dashboard updated successfully', {
       totalExpenses: expenseBreakdown.total,
-      portfolioValue: portfolioValue
+      portfolioValue: portfolioValue,
+      learnedCategories: categoryStats.totalMappings
     });
     
   } catch (error) {
     _logError('Failed to update dashboard', error);
   }
+}
+
+function _getCategoryLearningStats(categoriesSheet, mainSheet) {
+  const stats = {
+    totalMappings: 0,
+    categorizedTransactions: 0,
+    uncategorizedTransactions: 0,
+    categoryAccuracy: 0
+  };
+  
+  try {
+    // Count category mappings
+    if (categoriesSheet && categoriesSheet.getLastRow() > 1) {
+      stats.totalMappings = categoriesSheet.getLastRow() - 1;
+    }
+    
+    // Analyze transaction categorization
+    if (mainSheet && mainSheet.getLastRow() > 1) {
+      const data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, Math.max(mainSheet.getLastColumn(), 10)).getValues();
+      
+      for (const row of data) {
+        if (!row || row.length === 0) continue;
+        
+        const category = row[7] || ''; // Column H: Category
+        
+        if (category && category !== 'Uncategorized') {
+          stats.categorizedTransactions++;
+        } else {
+          stats.uncategorizedTransactions++;
+        }
+      }
+      
+      const total = stats.categorizedTransactions + stats.uncategorizedTransactions;
+      if (total > 0) {
+        stats.categoryAccuracy = (stats.categorizedTransactions / total) * 100;
+      }
+    }
+  } catch (error) {
+    _logError('Failed to get category learning stats', error);
+  }
+  
+  return stats;
 }
 
 function _getTransactionData(mainSheet, month, year) {
@@ -2153,38 +2564,96 @@ function _getPortfolioValue(holdingsSheet) {
 function _writeDashboardSummary(dashboardSheet, summary) {
   try {
     // Clear previous summary (adjust range as needed)
-    dashboardSheet.getRange('A1:D20').clearContent();
+    dashboardSheet.getRange('A1:D30').clearContent();
     
     // Write header
-    dashboardSheet.getRange('A1').setValue('Finance Dashboard Summary');
+    dashboardSheet.getRange('A1').setValue('Finance Dashboard Summary - Enhanced with AI Learning');
+    dashboardSheet.getRange('A1').setFontWeight('bold').setFontSize(14);
     dashboardSheet.getRange('A2').setValue(`Last Updated: ${summary.lastUpdated.toLocaleString()}`);
     
     // Write expense summary
     dashboardSheet.getRange('A4').setValue('Monthly Expenses');
-    dashboardSheet.getRange('B4').setValue(summary.totalExpenses.toFixed(2));
+    dashboardSheet.getRange('A4').setFontWeight('bold');
+    dashboardSheet.getRange('B4').setValue(`$${summary.totalExpenses.toFixed(2)}`);
     
     // Write category breakdown
     let row = 6;
     dashboardSheet.getRange('A6').setValue('Category Breakdown:');
-    for (const [category, amount] of Object.entries(summary.categoryBreakdown)) {
+    dashboardSheet.getRange('A6').setFontWeight('bold');
+    
+    const sortedCategories = Object.entries(summary.categoryBreakdown)
+      .sort(([,a], [,b]) => b - a); // Sort by amount descending
+    
+    for (const [category, amount] of sortedCategories) {
       row++;
-      dashboardSheet.getRange(`A${row}`).setValue(category);
-      dashboardSheet.getRange(`B${row}`).setValue(amount.toFixed(2));
+      dashboardSheet.getRange(`A${row}`).setValue(`  • ${category}`);
+      dashboardSheet.getRange(`B${row}`).setValue(`$${amount.toFixed(2)}`);
+      
+      // Color code high expenses
+      if (amount > 500) {
+        dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#d93025');
+      } else if (amount > 200) {
+        dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#ea8600');
+      }
     }
     
     // Write account balances
     row += 2;
     dashboardSheet.getRange(`A${row}`).setValue('Account Balances:');
+    dashboardSheet.getRange(`A${row}`).setFontWeight('bold');
+    
     for (const [account, info] of Object.entries(summary.accountBalances)) {
       row++;
-      dashboardSheet.getRange(`A${row}`).setValue(account);
-      dashboardSheet.getRange(`B${row}`).setValue(info.balance.toFixed(2));
+      dashboardSheet.getRange(`A${row}`).setValue(`  • ${account}`);
+      dashboardSheet.getRange(`B${row}`).setValue(`$${info.balance.toFixed(2)}`);
+      
+      // Color code negative balances (debt)
+      if (info.balance < 0) {
+        dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#d93025');
+      }
     }
     
     // Write portfolio value
     row += 2;
     dashboardSheet.getRange(`A${row}`).setValue('Investment Portfolio');
-    dashboardSheet.getRange(`B${row}`).setValue(summary.portfolioValue.toFixed(2));
+    dashboardSheet.getRange(`A${row}`).setFontWeight('bold');
+    dashboardSheet.getRange(`B${row}`).setValue(`$${summary.portfolioValue.toFixed(2)}`);
+    
+    // Write category learning statistics
+    if (summary.categoryStats) {
+      row += 2;
+      dashboardSheet.getRange(`A${row}`).setValue('AI Category Learning Stats:');
+      dashboardSheet.getRange(`A${row}`).setFontWeight('bold');
+      
+      row++;
+      dashboardSheet.getRange(`A${row}`).setValue(`  • Learned Merchants:`);
+      dashboardSheet.getRange(`B${row}`).setValue(summary.categoryStats.totalMappings);
+      
+      row++;
+      dashboardSheet.getRange(`A${row}`).setValue(`  • Categorized Transactions:`);
+      dashboardSheet.getRange(`B${row}`).setValue(summary.categoryStats.categorizedTransactions);
+      
+      row++;
+      dashboardSheet.getRange(`A${row}`).setValue(`  • Needs Categorization:`);
+      dashboardSheet.getRange(`B${row}`).setValue(summary.categoryStats.uncategorizedTransactions);
+      
+      row++;
+      dashboardSheet.getRange(`A${row}`).setValue(`  • Accuracy Rate:`);
+      dashboardSheet.getRange(`B${row}`).setValue(`${summary.categoryStats.categoryAccuracy.toFixed(1)}%`);
+      
+      // Color code accuracy
+      if (summary.categoryStats.categoryAccuracy >= 90) {
+        dashboardSheet.getRange(`B${row}`).setFontColor('#34a853');
+      } else if (summary.categoryStats.categoryAccuracy >= 70) {
+        dashboardSheet.getRange(`B${row}`).setFontColor('#ea8600');
+      } else {
+        dashboardSheet.getRange(`B${row}`).setFontColor('#d93025');
+      }
+    }
+    
+    // Format currency columns
+    const currencyRange = dashboardSheet.getRange(`B1:B${row}`);
+    currencyRange.setHorizontalAlignment('right');
     
   } catch (error) {
     _logError('Failed to write dashboard summary', error);
@@ -2240,6 +2709,14 @@ function pairStagedTransfers() {
 
 function cleanupStaleTransactions() {
   _cleanupStaleTransactions();
+}
+
+function updateNetWorth() {
+  _updateNetWorth();
+}
+
+function learnCategoriesFromTransactions() {
+  _learnCategoriesFromTransactions();
 }
 
 // ===================== FULL AUTOMATION RUNNER =====================
