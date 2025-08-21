@@ -840,6 +840,40 @@ function _parseEmailWithSenderContext(message, subject, body, accountsSheet) {
   }
 }
 
+// Merchant name enhancement based on sender capabilities
+function _enhanceMerchantName(rawMerchant, senderId) {
+  if (!rawMerchant || rawMerchant === 'Unknown Merchant') return rawMerchant;
+  
+  let cleaned = rawMerchant
+    .replace(/[0-9]{4,}/g, '') // Remove transaction IDs
+    .replace(/\b(pos|terminal|txn|ref)\b/gi, '') // Remove POS terms
+    .replace(/[^a-zA-Z0-9\s&'-]/g, ' ') // Clean special chars
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  // Sender-specific enhancements
+  switch (senderId) {
+    case 'cibc':
+      // CIBC provides excellent merchant info, minimal cleaning needed
+      cleaned = cleaned.replace(/\b(purchase|transaction)\b/gi, '').trim();
+      break;
+      
+    case 'pcfinancial':
+      // PC Financial provides good merchant info
+      cleaned = cleaned.replace(/\b(merchant|at)\b/gi, '').trim();
+      break;
+      
+    case 'wealthsimple':
+      // For ticker symbols, keep them as-is
+      if (/^[A-Z]{1,5}(\.TO)?$/.test(cleaned)) {
+        return cleaned.toUpperCase();
+      }
+      break;
+  }
+  
+  return cleaned || rawMerchant;
+}
+
 // ENHANCED: CIBC Email Parser with sender-aware capabilities
 function _parseCibcEmailEnhanced(message, subject, body, accountsSheet, senderProfile) {
   const subjectLower = _lc(subject);
@@ -1358,40 +1392,6 @@ function _parseWealthsimpleEmailEnhanced(message, subject, body, senderProfile) 
   }
   
   return null;
-}
-
-// Merchant name enhancement based on sender capabilities
-function _enhanceMerchantName(rawMerchant, senderId) {
-  if (!rawMerchant || rawMerchant === 'Unknown Merchant') return rawMerchant;
-  
-  let cleaned = rawMerchant
-    .replace(/[0-9]{4,}/g, '') // Remove transaction IDs
-    .replace(/\b(pos|terminal|txn|ref)\b/gi, '') // Remove POS terms
-    .replace(/[^a-zA-Z0-9\s&'-]/g, ' ') // Clean special chars
-    .replace(/\s+/g, ' ')
-    .trim();
-  
-  // Sender-specific enhancements
-  switch (senderId) {
-    case 'cibc':
-      // CIBC provides excellent merchant info, minimal cleaning needed
-      cleaned = cleaned.replace(/\b(purchase|transaction)\b/gi, '').trim();
-      break;
-      
-    case 'pcfinancial':
-      // PC Financial provides good merchant info
-      cleaned = cleaned.replace(/\b(merchant|at)\b/gi, '').trim();
-      break;
-      
-    case 'wealthsimple':
-      // For ticker symbols, keep them as-is
-      if (/^[A-Z]{1,5}(\.TO)?$/.test(cleaned)) {
-        return cleaned.toUpperCase();
-      }
-      break;
-  }
-  
-  return cleaned || rawMerchant;
 }
 
 // Fallback parsing for unknown senders
