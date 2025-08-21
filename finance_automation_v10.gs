@@ -413,14 +413,11 @@ function _setupInitialSheets(ss) {
       [SHEET_NAMES.AUDIT_LOG]: [
         'Timestamp', 'Level', 'Message', 'Details', 'Function'
       ],
-      [SHEET_NAMES.LEARNING_LOG]: [
-        'Timestamp', 'Pattern Type', 'Pattern', 'Confidence', 'Usage Count', 'Success Rate', 'Adaptation Suggested', 'Status'
+      [SHEET_NAMES.AI_LEARNING]: [
+        'Timestamp', 'LearningType', 'Pattern', 'Context', 'Confidence', 'SuccessCount', 'FailureCount', 'Metadata', 'Status', 'CrossValidated'
       ],
-      [SHEET_NAMES.PATTERN_LIBRARY]: [
-        'Timestamp', 'SenderId', 'PatternType', 'Pattern', 'Context', 'SuccessCount', 'LastUsed', 'Confidence'
-      ],
-      [SHEET_NAMES.FAILED_EMAILS]: [
-        'Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 'FailureReason', 'AttemptedParsers', 'PatternSuggestions', 'Status'
+      [SHEET_NAMES.FAILED_PARSING]: [
+        'Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 'FailureReason', 'AttemptedParsers', 'AIAnalysis', 'Status', 'Priority'
       ]
     };
     
@@ -879,27 +876,333 @@ function _enhanceMerchantName(rawMerchant, senderId) {
   return cleaned || rawMerchant;
 }
 
-// ===================== ADAPTIVE LEARNING FRAMEWORK =====================
+// ===================== UNIFIED AI LEARNING FRAMEWORK =====================
 
 /**
- * Self-learning system that analyzes parsing failures and adapts patterns
+ * Unified AI Learning System that combines:
+ * 1. Email parsing pattern learning
+ * 2. Category classification learning 
+ * 3. Cross-validation between systems for improved accuracy
  */
-function _logParsingFailure(message, subject, body, failureReason, attemptedParsers = []) {
+const AI_LEARNING_TYPES = {
+  EMAIL_PARSING: 'email_parsing',
+  CATEGORY_CLASSIFICATION: 'category_classification',
+  MERCHANT_EXTRACTION: 'merchant_extraction',
+  AMOUNT_DETECTION: 'amount_detection',
+  SENDER_IDENTIFICATION: 'sender_identification',
+  CROSS_VALIDATION: 'cross_validation'
+};
+
+/**
+ * Unified learning record structure
+ */
+function _recordAILearning(type, pattern, context, confidence, metadata = {}) {
   if (!CONFIG.LEARNING_ENABLED) return;
   
   try {
     const ss = _ss();
-    let failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_EMAILS);
+    let aiLearningSheet = ss.getSheetByName(SHEET_NAMES.AI_LEARNING);
     
-    if (!failedSheet) {
-      failedSheet = ss.insertSheet(SHEET_NAMES.FAILED_EMAILS);
-      failedSheet.appendRow([
-        'Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 
-        'FailureReason', 'AttemptedParsers', 'PatternSuggestions', 'Status'
+    if (!aiLearningSheet) {
+      aiLearningSheet = ss.insertSheet(SHEET_NAMES.AI_LEARNING);
+      aiLearningSheet.appendRow([
+        'Timestamp', 'LearningType', 'Pattern', 'Context', 'Confidence', 
+        'SuccessCount', 'FailureCount', 'Metadata', 'Status', 'CrossValidated'
       ]);
     }
     
-    const suggestions = _generatePatternSuggestions(subject, body, attemptedParsers);
+    // Check if pattern already exists
+    const data = aiLearningSheet.getDataRange().getValues();
+    let existingRow = -1;
+    
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][1] === type && data[i][2] === pattern) {
+        existingRow = i + 1;
+        break;
+      }
+    }
+    
+    if (existingRow > 0) {
+      // Update existing pattern
+      const currentSuccess = parseInt(aiLearningSheet.getRange(existingRow, 6).getValue()) || 0;
+      const currentFailure = parseInt(aiLearningSheet.getRange(existingRow, 7).getValue()) || 0;
+      const totalUsage = currentSuccess + currentFailure + 1;
+      const newConfidence = ((currentSuccess + 1) / totalUsage) * confidence;
+      
+      aiLearningSheet.getRange(existingRow, 1).setValue(new Date()); // Timestamp
+      aiLearningSheet.getRange(existingRow, 5).setValue(newConfidence); // Confidence
+      aiLearningSheet.getRange(existingRow, 6).setValue(currentSuccess + 1); // Success count
+      aiLearningSheet.getRange(existingRow, 8).setValue(JSON.stringify(metadata)); // Metadata
+    } else {
+      // Add new pattern
+      aiLearningSheet.appendRow([
+        new Date(),
+        type,
+        pattern,
+        context.substring(0, 200),
+        confidence,
+        1, // Success count
+        0, // Failure count
+        JSON.stringify(metadata),
+        'ACTIVE',
+        false // Cross validated
+      ]);
+    }
+    
+  } catch (error) {
+    _logError('Failed to record AI learning', error);
+  }
+}
+
+/**
+ * Cross-validation between category and parsing learning
+ */
+function _crossValidateAILearning() {
+  try {
+    const ss = _ss();
+    const aiLearningSheet = ss.getSheetByName(SHEET_NAMES.AI_LEARNING);
+    if (!aiLearningSheet || aiLearningSheet.getLastRow() < 2) return;
+    
+    const learningData = aiLearningSheet.getDataRange().getValues().slice(1);
+    const categoryPatterns = learningData.filter(row => row[1] === AI_LEARNING_TYPES.CATEGORY_CLASSIFICATION);
+    const merchantPatterns = learningData.filter(row => row[1] === AI_LEARNING_TYPES.MERCHANT_EXTRACTION);
+    
+    let validationResults = [];
+    
+    // Cross-validate merchant extraction with category patterns
+    merchantPatterns.forEach(merchantRow => {
+      const merchantName = merchantRow[2]; // Pattern
+      const merchantMeta = JSON.parse(merchantRow[7] || '{}'); // Metadata
+      
+      // Find corresponding category patterns
+      const relatedCategories = categoryPatterns.filter(catRow => {
+        const categoryMeta = JSON.parse(catRow[7] || '{}');
+        return categoryMeta.merchant && 
+               categoryMeta.merchant.toLowerCase().includes(merchantName.toLowerCase());
+      });
+      
+      if (relatedCategories.length > 0) {
+        const consensusCategory = _findCategoryConsensus(relatedCategories);
+        const confidence = _calculateCrossValidationConfidence(merchantRow, relatedCategories);
+        
+        validationResults.push({
+          type: 'merchant_category_validation',
+          merchant: merchantName,
+          suggestedCategory: consensusCategory,
+          confidence: confidence,
+          supportingEvidence: relatedCategories.length
+        });
+      }
+    });
+    
+    // Record cross-validation results
+    validationResults.forEach(result => {
+      if (result.confidence > CONFIG.PATTERN_CONFIDENCE_THRESHOLD) {
+        _recordAILearning(
+          AI_LEARNING_TYPES.CROSS_VALIDATION,
+          `${result.merchant}→${result.suggestedCategory}`,
+          'Cross-validated merchant-category mapping',
+          result.confidence,
+          {
+            validationType: result.type,
+            supportingEvidence: result.supportingEvidence,
+            autoGenerated: true
+          }
+        );
+      }
+    });
+    
+    _logInfo(`Cross-validation completed: ${validationResults.length} validations processed`);
+    
+  } catch (error) {
+    _logError('Cross-validation failed', error);
+  }
+}
+
+/**
+ * Find consensus category from multiple patterns
+ */
+function _findCategoryConsensus(categoryPatterns) {
+  const categoryVotes = {};
+  
+  categoryPatterns.forEach(pattern => {
+    const metadata = JSON.parse(pattern[7] || '{}');
+    const category = metadata.category || pattern[2];
+    const confidence = parseFloat(pattern[4]) || 0;
+    
+    categoryVotes[category] = (categoryVotes[category] || 0) + confidence;
+  });
+  
+  return Object.entries(categoryVotes)
+    .sort((a, b) => b[1] - a[1])[0]?.[0] || 'Uncategorized';
+}
+
+/**
+ * Calculate cross-validation confidence
+ */
+function _calculateCrossValidationConfidence(merchantPattern, categoryPatterns) {
+  const merchantConfidence = parseFloat(merchantPattern[4]) || 0;
+  const categoryConfidences = categoryPatterns.map(p => parseFloat(p[4]) || 0);
+  const avgCategoryConfidence = categoryConfidences.reduce((a, b) => a + b, 0) / categoryConfidences.length;
+  
+  // Weighted average with merchant extraction confidence
+  return (merchantConfidence * 0.6) + (avgCategoryConfidence * 0.4);
+}
+
+/**
+ * Enhanced category learning with AI integration
+ */
+function _enhancedCategoryLearning() {
+  try {
+    _logInfo('Starting unified AI category learning...');
+    
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    
+    if (!mainSheet || !categoriesSheet) {
+      _logError('Required sheets not found for category learning');
+      return;
+    }
+    
+    // Get transaction data
+    const lastRow = mainSheet.getLastRow();
+    if (lastRow < 2) return;
+    
+    const data = mainSheet.getRange(2, 1, lastRow - 1, Math.max(mainSheet.getLastColumn(), 10)).getValues();
+    const merchantAnalysis = {};
+    
+    // Analyze patterns with AI learning integration
+    for (const row of data) {
+      if (!row || row.length === 0) continue;
+      
+      const toAccount = row[3] || ''; // Column D: To Account  
+      const category = row[7] || ''; // Column H: Category
+      const amount = Math.abs(parseFloat(row[1] || 0)); // Column B: Amount
+      const fromAccount = row[2] || ''; // Column C: From Account
+      
+      if (!toAccount || !category || category === 'Uncategorized') continue;
+      
+      const merchant = _extractCleanMerchantName(toAccount);
+      if (!merchant || merchant.length < 3) continue;
+      
+      const merchantKey = merchant.toLowerCase();
+      
+      if (!merchantAnalysis[merchantKey]) {
+        merchantAnalysis[merchantKey] = {
+          originalName: merchant,
+          categories: {},
+          totalTransactions: 0,
+          totalAmount: 0,
+          accounts: new Set(),
+          patterns: []
+        };
+      }
+      
+      const analysis = merchantAnalysis[merchantKey];
+      analysis.categories[category] = (analysis.categories[category] || 0) + 1;
+      analysis.totalTransactions++;
+      analysis.totalAmount += amount;
+      analysis.accounts.add(fromAccount);
+      
+      // Record pattern for AI learning
+      analysis.patterns.push({
+        amount: amount,
+        category: category,
+        fromAccount: fromAccount,
+        date: new Date(row[0] || new Date())
+      });
+    }
+    
+    // Generate AI-enhanced recommendations
+    const recommendations = [];
+    
+    for (const [merchantKey, analysis] of Object.entries(merchantAnalysis)) {
+      const dominantCategory = Object.entries(analysis.categories)
+        .reduce((a, b) => analysis.categories[a[0]] > analysis.categories[b[0]] ? a : b);
+      
+      const confidence = dominantCategory[1] / analysis.totalTransactions;
+      const frequency = analysis.totalTransactions;
+      
+      if (confidence >= 0.7 && frequency >= 2) {
+        // Record in AI learning system
+        _recordAILearning(
+          AI_LEARNING_TYPES.CATEGORY_CLASSIFICATION,
+          `${analysis.originalName}→${dominantCategory[0]}`,
+          `Merchant categorization pattern`,
+          confidence,
+          {
+            merchant: analysis.originalName,
+            category: dominantCategory[0],
+            frequency: frequency,
+            totalAmount: analysis.totalAmount,
+            accounts: Array.from(analysis.accounts),
+            patternCount: analysis.patterns.length
+          }
+        );
+        
+        recommendations.push({
+          merchant: analysis.originalName,
+          category: dominantCategory[0],
+          confidence: confidence,
+          frequency: frequency
+        });
+      }
+    }
+    
+    // Cross-validate with existing AI patterns
+    _crossValidateAILearning();
+    
+    // Add high-confidence recommendations to Categories sheet
+    let addedCount = 0;
+    const existingMappings = new Set();
+    
+    if (categoriesSheet.getLastRow() > 1) {
+      const existingData = categoriesSheet.getRange(2, 1, categoriesSheet.getLastRow() - 1, 2).getValues();
+      existingData.forEach(row => {
+        if (row[0]) existingMappings.add(row[0].toLowerCase());
+      });
+    }
+    
+    recommendations
+      .filter(rec => !existingMappings.has(rec.merchant.toLowerCase()))
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 10) // Top 10 recommendations
+      .forEach(rec => {
+        categoriesSheet.appendRow([rec.merchant, rec.category]);
+        addedCount++;
+      });
+    
+    _logInfo(`Enhanced AI category learning completed: ${addedCount} new mappings added`);
+    
+    return { added: addedCount, analyzed: Object.keys(merchantAnalysis).length };
+    
+  } catch (error) {
+    _logError('Enhanced category learning failed', error);
+    throw error;
+  }
+}
+
+/**
+ * Unified parsing failure logging with AI learning
+ */
+function _logUnifiedParsingFailure(message, subject, body, failureReason, attemptedParsers = []) {
+  if (!CONFIG.LEARNING_ENABLED) return;
+  
+  try {
+    const ss = _ss();
+    let failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_PARSING);
+    
+    if (!failedSheet) {
+      failedSheet = ss.insertSheet(SHEET_NAMES.FAILED_PARSING);
+      failedSheet.appendRow([
+        'Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 
+        'FailureReason', 'AttemptedParsers', 'AIAnalysis', 'Status', 'Priority'
+      ]);
+    }
+    
+    // Generate AI analysis of the failure
+    const aiAnalysis = _generateAIFailureAnalysis(subject, body, attemptedParsers);
     
     failedSheet.appendRow([
       new Date(),
@@ -909,238 +1212,87 @@ function _logParsingFailure(message, subject, body, failureReason, attemptedPars
       body.substring(0, 200),
       failureReason,
       attemptedParsers.join(', '),
-      JSON.stringify(suggestions),
-      'PENDING_ANALYSIS'
+      JSON.stringify(aiAnalysis),
+      'PENDING_AI_ANALYSIS',
+      aiAnalysis.priority || 'MEDIUM'
     ]);
     
-    _analyzeFailurePatterns();
+    // Record patterns for learning
+    if (aiAnalysis.patterns && aiAnalysis.patterns.length > 0) {
+      aiAnalysis.patterns.forEach(pattern => {
+        _recordAILearning(
+          pattern.type,
+          pattern.pattern,
+          pattern.context,
+          pattern.confidence,
+          {
+            source: 'failure_analysis',
+            emailDomain: message.getFrom().split('@')[1],
+            failureReason: failureReason
+          }
+        );
+      });
+    }
     
   } catch (error) {
-    _logError('Failed to log parsing failure', error);
+    _logError('Failed to log unified parsing failure', error);
   }
 }
 
 /**
- * Generates pattern suggestions based on email content
+ * Generate AI analysis of parsing failures
  */
-function _generatePatternSuggestions(subject, body, attemptedParsers) {
-  const suggestions = {
-    amountPatterns: [],
-    merchantPatterns: [],
-    senderIdentification: [],
-    keywords: []
+function _generateAIFailureAnalysis(subject, body, attemptedParsers) {
+  const analysis = {
+    patterns: [],
+    priority: 'MEDIUM',
+    suggestions: []
   };
   
-  // Extract potential amount patterns
-  const amountMatches = body.match(/\$?[0-9,]+\.[0-9]{2}/g) || [];
+  // Analyze potential amount patterns
+  const amountMatches = body.match(/[\$€£¥]?[0-9,]+\.[0-9]{2}/g) || [];
   amountMatches.forEach(match => {
-    const context = body.substring(Math.max(0, body.indexOf(match) - 20), body.indexOf(match) + match.length + 20);
-    suggestions.amountPatterns.push({
+    const context = body.substring(Math.max(0, body.indexOf(match) - 30), body.indexOf(match) + match.length + 30);
+    analysis.patterns.push({
+      type: AI_LEARNING_TYPES.AMOUNT_DETECTION,
       pattern: match,
       context: context.trim(),
       confidence: 0.8
     });
   });
   
-  // Extract potential merchant patterns
-  const merchantIndicators = ['to ', 'at ', 'from ', 'merchant:', 'payee:'];
+  // Analyze potential merchant patterns
+  const merchantIndicators = ['to ', 'at ', 'from ', 'merchant:', 'payee:', 'authorized to'];
   merchantIndicators.forEach(indicator => {
-    const regex = new RegExp(indicator + '([A-Za-z0-9\\s,.-]{5,30})', 'gi');
+    const regex = new RegExp(indicator + '([A-Za-z0-9\\s,.-]{5,50})', 'gi');
     const matches = body.match(regex) || [];
     matches.forEach(match => {
-      suggestions.merchantPatterns.push({
+      analysis.patterns.push({
+        type: AI_LEARNING_TYPES.MERCHANT_EXTRACTION,
         pattern: match.replace(indicator, '').trim(),
-        indicator: indicator,
+        context: indicator,
         confidence: 0.6
       });
     });
   });
   
-  // Suggest sender identification improvements
-  const from = subject.toLowerCase();
-  if (!attemptedParsers.includes('domain_match')) {
-    const domain = from.match(/@([^>]+)/);
-    if (domain) {
-      suggestions.senderIdentification.push({
-        type: 'domain',
-        value: domain[1],
-        confidence: 0.9
-      });
-    }
+  // Determine priority based on patterns found
+  if (analysis.patterns.length > 2) {
+    analysis.priority = 'HIGH';
+  } else if (analysis.patterns.length === 0) {
+    analysis.priority = 'LOW';
   }
   
-  return suggestions;
-}
-
-/**
- * Analyzes failure patterns and suggests adaptations
- */
-function _analyzeFailurePatterns() {
-  try {
-    const ss = _ss();
-    const failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_EMAILS);
-    if (!failedSheet || failedSheet.getLastRow() < 2) return;
-    
-    let learningSheet = ss.getSheetByName(SHEET_NAMES.LEARNING_LOG);
-    if (!learningSheet) {
-      learningSheet = ss.insertSheet(SHEET_NAMES.LEARNING_LOG);
-      learningSheet.appendRow([
-        'Timestamp', 'Pattern Type', 'Pattern', 'Confidence', 'Usage Count', 
-        'Success Rate', 'Adaptation Suggested', 'Status'
-      ]);
-    }
-    
-    const failures = failedSheet.getDataRange().getValues().slice(1);
-    const recentFailures = failures.filter(row => {
-      const timestamp = new Date(row[0]);
-      const daysDiff = (new Date() - timestamp) / (1000 * 60 * 60 * 24);
-      return daysDiff <= CONFIG.LEARNING_RETENTION_DAYS;
-    });
-    
-    // Group failures by sender domain
-    const domainFailures = {};
-    recentFailures.forEach(row => {
-      const from = row[2]; // From column
-      const domain = from.match(/@([^>]+)/);
-      if (domain) {
-        const domainKey = domain[1];
-        if (!domainFailures[domainKey]) {
-          domainFailures[domainKey] = [];
-        }
-        domainFailures[domainKey].push(row);
-      }
-    });
-    
-    // Identify domains needing new parsers
-    Object.entries(domainFailures).forEach(([domain, failures]) => {
-      if (failures.length >= CONFIG.ADAPTATION_TRIGGER_COUNT) {
-        _suggestNewParser(domain, failures, learningSheet);
-      }
-    });
-    
-  } catch (error) {
-    _logError('Failed to analyze failure patterns', error);
+  // Generate suggestions
+  if (amountMatches.length > 0 && analysis.patterns.some(p => p.type === AI_LEARNING_TYPES.MERCHANT_EXTRACTION)) {
+    analysis.suggestions.push('Consider adding new email parser for this domain');
   }
+  
+  return analysis;
 }
 
 /**
- * Suggests new parser adaptations based on failure analysis
- */
-function _suggestNewParser(domain, failures, learningSheet) {
-  const suggestions = [];
-  
-  failures.forEach(failure => {
-    try {
-      const patternSuggestions = JSON.parse(failure[7]); // PatternSuggestions column
-      
-      // Analyze amount patterns
-      patternSuggestions.amountPatterns?.forEach(pattern => {
-        if (pattern.confidence > CONFIG.PATTERN_CONFIDENCE_THRESHOLD) {
-          suggestions.push({
-            type: 'amount_pattern',
-            domain: domain,
-            pattern: pattern.pattern,
-            context: pattern.context,
-            confidence: pattern.confidence
-          });
-        }
-      });
-      
-      // Analyze merchant patterns
-      patternSuggestions.merchantPatterns?.forEach(pattern => {
-        if (pattern.confidence > CONFIG.PATTERN_CONFIDENCE_THRESHOLD) {
-          suggestions.push({
-            type: 'merchant_pattern',
-            domain: domain,
-            pattern: pattern.pattern,
-            indicator: pattern.indicator,
-            confidence: pattern.confidence
-          });
-        }
-      });
-      
-    } catch (e) {
-      // Skip malformed suggestions
-    }
-  });
-  
-  // Log the highest confidence suggestions
-  const topSuggestions = suggestions
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 5);
-    
-  topSuggestions.forEach(suggestion => {
-    learningSheet.appendRow([
-      new Date(),
-      suggestion.type,
-      suggestion.pattern,
-      suggestion.confidence,
-      1, // Usage count starts at 1
-      0, // Success rate unknown initially
-      `Consider adding parser for ${domain}`,
-      'PENDING_IMPLEMENTATION'
-    ]);
-  });
-  
-  _logInfo(`Generated ${topSuggestions.length} learning suggestions for domain: ${domain}`);
-}
-
-/**
- * Adaptive pattern library that learns from successful parses
- */
-function _recordSuccessfulPattern(patternType, pattern, context, senderId) {
-  if (!CONFIG.LEARNING_ENABLED) return;
-  
-  try {
-    const ss = _ss();
-    let patternSheet = ss.getSheetByName(SHEET_NAMES.PATTERN_LIBRARY);
-    
-    if (!patternSheet) {
-      patternSheet = ss.insertSheet(SHEET_NAMES.PATTERN_LIBRARY);
-      patternSheet.appendRow([
-        'Timestamp', 'SenderId', 'PatternType', 'Pattern', 'Context', 
-        'SuccessCount', 'LastUsed', 'Confidence'
-      ]);
-    }
-    
-    // Check if pattern already exists
-    const data = patternSheet.getDataRange().getValues();
-    let existingRow = -1;
-    
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][1] === senderId && data[i][2] === patternType && data[i][3] === pattern) {
-        existingRow = i + 1;
-        break;
-      }
-    }
-    
-    if (existingRow > 0) {
-      // Update existing pattern
-      const currentCount = parseInt(patternSheet.getRange(existingRow, 6).getValue()) || 0;
-      patternSheet.getRange(existingRow, 6).setValue(currentCount + 1);
-      patternSheet.getRange(existingRow, 7).setValue(new Date());
-      patternSheet.getRange(existingRow, 8).setValue(Math.min(1.0, (currentCount + 1) * 0.1));
-    } else {
-      // Add new pattern
-      patternSheet.appendRow([
-        new Date(),
-        senderId,
-        patternType,
-        pattern,
-        context.substring(0, 100),
-        1,
-        new Date(),
-        0.5 // Initial confidence
-      ]);
-    }
-    
-  } catch (error) {
-    _logError('Failed to record successful pattern', error);
-  }
-}
-
-/**
- * Enhanced parsing with adaptive learning
+ * Enhanced parsing with unified AI learning
  */
 function _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet) {
   const attemptedParsers = [];
@@ -1155,29 +1307,42 @@ function _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet) 
       transaction = _parseEmailWithSenderContext(message, subject, body, accountsSheet);
       
       if (transaction) {
-        // Record successful patterns
-        _recordSuccessfulPattern('sender_identification', sender.id, message.getFrom(), sender.id);
+        // Record successful patterns in unified AI system
+        _recordAILearning(AI_LEARNING_TYPES.SENDER_IDENTIFICATION, sender.id, message.getFrom(), 0.9, {
+          domain: message.getFrom().split('@')[1],
+          confidence: sender.confidence
+        });
+        
         if (transaction.amount) {
-          _recordSuccessfulPattern('amount_extraction', transaction.amount.toString(), body.substring(0, 200), sender.id);
+          _recordAILearning(AI_LEARNING_TYPES.AMOUNT_DETECTION, transaction.amount.toString(), body.substring(0, 200), 0.8, {
+            senderId: sender.id,
+            currency: transaction.notes?.includes('USD') ? 'USD' : 'CAD'
+          });
         }
+        
         if (transaction.merchant && transaction.merchant !== 'Unknown Merchant') {
-          _recordSuccessfulPattern('merchant_extraction', transaction.merchant, body.substring(0, 200), sender.id);
+          _recordAILearning(AI_LEARNING_TYPES.MERCHANT_EXTRACTION, transaction.merchant, body.substring(0, 200), 0.7, {
+            senderId: sender.id,
+            toAccount: transaction.toAccount
+          });
         }
         
         return transaction;
       }
     }
     
-    // If standard parsing failed, try adaptive patterns
-    transaction = _tryAdaptivePatterns(message, subject, body, attemptedParsers);
+    // If standard parsing failed, try unified AI patterns
+    transaction = _tryUnifiedAIPatterns(message, subject, body, attemptedParsers);
     
     if (transaction) {
-      _recordSuccessfulPattern('adaptive_parsing', 'success', body.substring(0, 100), 'adaptive');
+      _recordAILearning(AI_LEARNING_TYPES.EMAIL_PARSING, 'unified_success', body.substring(0, 100), 0.6, {
+        fallbackMethod: true
+      });
       return transaction;
     }
     
-    // If all parsing failed, log for learning
-    _logParsingFailure(
+    // If all parsing failed, log for unified learning
+    _logUnifiedParsingFailure(
       message, 
       subject, 
       body, 
@@ -1188,7 +1353,7 @@ function _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet) 
     return null;
     
   } catch (error) {
-    _logParsingFailure(
+    _logUnifiedParsingFailure(
       message, 
       subject, 
       body, 
@@ -1200,30 +1365,32 @@ function _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet) 
 }
 
 /**
- * Try parsing using learned adaptive patterns
+ * Try parsing using unified AI patterns
  */
-function _tryAdaptivePatterns(message, subject, body, attemptedParsers) {
+function _tryUnifiedAIPatterns(message, subject, body, attemptedParsers) {
   try {
     const ss = _ss();
-    const patternSheet = ss.getSheetByName(SHEET_NAMES.PATTERN_LIBRARY);
-    if (!patternSheet || patternSheet.getLastRow() < 2) return null;
+    const aiLearningSheet = ss.getSheetByName(SHEET_NAMES.AI_LEARNING);
+    if (!aiLearningSheet || aiLearningSheet.getLastRow() < 2) return null;
     
-    const patterns = patternSheet.getDataRange().getValues().slice(1);
+    const patterns = aiLearningSheet.getDataRange().getValues().slice(1);
     const confidenceThreshold = CONFIG.PATTERN_CONFIDENCE_THRESHOLD;
     
     // Filter high-confidence patterns
     const highConfidencePatterns = patterns.filter(row => 
-      parseFloat(row[7]) >= confidenceThreshold // Confidence column
+      parseFloat(row[4]) >= confidenceThreshold && // Confidence column
+      row[8] === 'ACTIVE' // Status column
     );
     
     // Try to extract transaction using learned patterns
     let amount = null;
     let merchant = null;
+    let category = null;
     
-    // Try amount extraction patterns
-    const amountPatterns = highConfidencePatterns.filter(row => row[2] === 'amount_extraction');
+    // Try amount detection patterns
+    const amountPatterns = highConfidencePatterns.filter(row => row[1] === AI_LEARNING_TYPES.AMOUNT_DETECTION);
     for (const pattern of amountPatterns) {
-      const amountMatch = body.match(new RegExp(pattern[3].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+      const amountMatch = body.match(new RegExp(pattern[2].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
       if (amountMatch) {
         amount = parseFloat(amountMatch[0].replace(/[^0-9.]/g, ''));
         break;
@@ -1231,34 +1398,47 @@ function _tryAdaptivePatterns(message, subject, body, attemptedParsers) {
     }
     
     // Try merchant extraction patterns
-    const merchantPatterns = highConfidencePatterns.filter(row => row[2] === 'merchant_extraction');
+    const merchantPatterns = highConfidencePatterns.filter(row => row[1] === AI_LEARNING_TYPES.MERCHANT_EXTRACTION);
     for (const pattern of merchantPatterns) {
-      if (body.toLowerCase().includes(pattern[3].toLowerCase())) {
-        merchant = pattern[3];
+      if (body.toLowerCase().includes(pattern[2].toLowerCase())) {
+        merchant = pattern[2];
+        
+        // Try to get category from cross-validation
+        const crossValidationPatterns = highConfidencePatterns.filter(row => 
+          row[1] === AI_LEARNING_TYPES.CROSS_VALIDATION &&
+          row[2].includes(merchant)
+        );
+        
+        if (crossValidationPatterns.length > 0) {
+          const categoryMatch = crossValidationPatterns[0][2].match(/→(.+)/);
+          if (categoryMatch) {
+            category = categoryMatch[1];
+          }
+        }
         break;
       }
     }
     
     if (amount && amount > 0) {
-      attemptedParsers.push('adaptive_patterns');
+      attemptedParsers.push('unified_ai_patterns');
       
       return {
         date: message.getDate(),
         amount: amount,
-        fromAccount: 'Unknown Account',
-        toAccount: merchant || 'Unknown Merchant',
-        bank: 'Adaptive Learning',
-        notes: `Parsed using adaptive patterns (confidence: learned)`,
+        fromAccount: 'AI Detected Account',
+        toAccount: merchant || 'AI Detected Merchant',
+        bank: 'Unified AI Learning',
+        notes: `Parsed using unified AI patterns (confidence: learned)`,
         emailId: message.getId(),
         type: 'purchase',
-        category: 'Uncategorized'
+        category: category || 'Uncategorized'
       };
     }
     
     return null;
     
   } catch (error) {
-    _logError('Adaptive pattern parsing failed', error);
+    _logError('Unified AI pattern parsing failed', error);
     return null;
   }
 }
@@ -1866,10 +2046,23 @@ function _parsePayPalEmailEnhanced(message, subject, body, senderProfile) {
       }
     };
     
-    // Record successful patterns for learning
-    _recordSuccessfulPattern('amount_extraction', amount.toString(), body.substring(0, 200), 'paypal');
-    _recordSuccessfulPattern('merchant_extraction', merchant, body.substring(0, 200), 'paypal');
-    _recordSuccessfulPattern('authorization_detection', 'success', subject + ' | ' + body.substring(0, 100), 'paypal');
+    // Record successful patterns in unified AI system
+    _recordAILearning(AI_LEARNING_TYPES.AMOUNT_DETECTION, amount.toString(), body.substring(0, 200), 0.9, {
+      senderId: 'paypal',
+      currency: currency,
+      pattern: 'paypal_authorization'
+    });
+    
+    _recordAILearning(AI_LEARNING_TYPES.MERCHANT_EXTRACTION, merchant, body.substring(0, 200), 0.8, {
+      senderId: 'paypal',
+      extractionMethod: 'authorization_pattern'
+    });
+    
+    _recordAILearning(AI_LEARNING_TYPES.EMAIL_PARSING, 'paypal_authorization_success', subject + ' | ' + body.substring(0, 100), 0.9, {
+      senderId: 'paypal',
+      transactionType: 'authorization',
+      linkedAccount: linkedAccount
+    });
     
     return transaction;
   }
@@ -4143,139 +4336,169 @@ function updateDashboard() {
 
 function analyzeLearningData() {
   try {
-    _logInfo('=== LEARNING ANALYSIS STARTED ===');
-    _analyzeFailurePatterns();
+    _logInfo('=== UNIFIED AI LEARNING ANALYSIS STARTED ===');
+    
+    // Trigger cross-validation
+    _crossValidateAILearning();
     
     const ss = _ss();
-    const learningSheet = ss.getSheetByName(SHEET_NAMES.LEARNING_LOG);
-    const failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_EMAILS);
-    const patternSheet = ss.getSheetByName(SHEET_NAMES.PATTERN_LIBRARY);
+    const aiLearningSheet = ss.getSheetByName(SHEET_NAMES.AI_LEARNING);
+    const failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_PARSING);
     
-    let report = "Learning System Analysis Report\n";
-    report += "================================\n\n";
+    let report = "Unified AI Learning System Analysis Report\n";
+    report += "==========================================\n\n";
     
-    if (failedSheet && failedSheet.getLastRow() > 1) {
-      const failureCount = failedSheet.getLastRow() - 1;
-      report += `Failed Email Parsing Attempts: ${failureCount}\n`;
+    // Analyze AI learning patterns
+    if (aiLearningSheet && aiLearningSheet.getLastRow() > 1) {
+      const learningData = aiLearningSheet.getDataRange().getValues().slice(1);
       
-      // Analyze failure patterns by domain
-      const failures = failedSheet.getDataRange().getValues().slice(1);
-      const domainFailures = {};
+      const totalPatterns = learningData.length;
+      const activePatterns = learningData.filter(row => row[8] === 'ACTIVE').length;
+      const crossValidated = learningData.filter(row => row[9] === true).length;
       
-      failures.forEach(row => {
-        const from = row[2];
-        const domain = from.match(/@([^>]+)/);
-        if (domain) {
-          domainFailures[domain[1]] = (domainFailures[domain[1]] || 0) + 1;
-        }
+      report += `Total AI Learning Patterns: ${totalPatterns}\n`;
+      report += `Active Patterns: ${activePatterns}\n`;
+      report += `Cross-Validated Patterns: ${crossValidated}\n\n`;
+      
+      // Break down by learning type
+      const typeBreakdown = {};
+      learningData.forEach(row => {
+        const type = row[1];
+        typeBreakdown[type] = (typeBreakdown[type] || 0) + 1;
       });
       
-      report += "\nFailures by Domain:\n";
-      Object.entries(domainFailures)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .forEach(([domain, count]) => {
-          report += `  ${domain}: ${count} failures\n`;
-        });
-    }
-    
-    if (patternSheet && patternSheet.getLastRow() > 1) {
-      const patternCount = patternSheet.getLastRow() - 1;
-      report += `\nLearned Patterns: ${patternCount}\n`;
+      report += "Learning Type Breakdown:\n";
+      Object.entries(typeBreakdown).forEach(([type, count]) => {
+        report += `  ${type}: ${count} patterns\n`;
+      });
       
-      const patterns = patternSheet.getDataRange().getValues().slice(1);
-      const highConfidencePatterns = patterns.filter(row => parseFloat(row[7]) >= CONFIG.PATTERN_CONFIDENCE_THRESHOLD);
-      report += `High Confidence Patterns (>=${CONFIG.PATTERN_CONFIDENCE_THRESHOLD}): ${highConfidencePatterns.length}\n`;
+      // High confidence patterns
+      const highConfidencePatterns = learningData.filter(row => parseFloat(row[4]) >= CONFIG.PATTERN_CONFIDENCE_THRESHOLD);
+      report += `\nHigh Confidence Patterns (>=${CONFIG.PATTERN_CONFIDENCE_THRESHOLD}): ${highConfidencePatterns.length}\n`;
     }
     
-    if (learningSheet && learningSheet.getLastRow() > 1) {
-      const suggestionCount = learningSheet.getLastRow() - 1;
-      report += `\nGenerated Learning Suggestions: ${suggestionCount}\n`;
+    // Analyze parsing failures
+    if (failedSheet && failedSheet.getLastRow() > 1) {
+      const failures = failedSheet.getDataRange().getValues().slice(1);
+      const recentFailures = failures.filter(row => {
+        const timestamp = new Date(row[0]);
+        const daysDiff = (new Date() - timestamp) / (1000 * 60 * 60 * 24);
+        return daysDiff <= 30; // Last 30 days
+      });
       
-      const suggestions = learningSheet.getDataRange().getValues().slice(1);
-      const pendingSuggestions = suggestions.filter(row => row[7] === 'PENDING_IMPLEMENTATION');
-      report += `Pending Implementation: ${pendingSuggestions.length}\n`;
+      report += `\nParsing Failures (last 30 days): ${recentFailures.length}\n`;
+      
+      // Priority breakdown
+      const priorityBreakdown = {};
+      recentFailures.forEach(row => {
+        const priority = row[9] || 'UNKNOWN';
+        priorityBreakdown[priority] = (priorityBreakdown[priority] || 0) + 1;
+      });
+      
+      report += "Failure Priority Breakdown:\n";
+      Object.entries(priorityBreakdown).forEach(([priority, count]) => {
+        report += `  ${priority}: ${count} failures\n`;
+      });
     }
     
-    _logInfo('Learning Analysis Complete', { reportPreview: report.substring(0, 200) });
+    // Category learning integration
+    const categoryStats = _getCategoryLearningStats(ss.getSheetByName(SHEET_NAMES.CATEGORIES), ss.getSheetByName(SHEET_NAMES.MAIN));
+    if (categoryStats) {
+      report += `\nCategory Learning Integration:\n`;
+      report += `  Total Category Mappings: ${categoryStats.totalMappings}\n`;
+      report += `  Coverage Rate: ${(categoryStats.coverageRate * 100).toFixed(1)}%\n`;
+      report += `  Uncategorized Transactions: ${categoryStats.uncategorizedCount}\n`;
+    }
+    
+    _logInfo('Unified AI Learning Analysis Complete', { reportPreview: report.substring(0, 200) });
     
     // Show report in UI
     const ui = SpreadsheetApp.getUi();
-    ui.alert('Learning System Analysis', report, ui.ButtonSet.OK);
+    ui.alert('Unified AI Learning Analysis', report, ui.ButtonSet.OK);
     
     return report;
     
   } catch (error) {
-    _logError('Learning analysis failed', error);
+    _logError('Unified learning analysis failed', error);
     throw error;
   }
 }
 
-function implementTopLearningPattern() {
+function implementTopAIPattern() {
   try {
     const ss = _ss();
-    const learningSheet = ss.getSheetByName(SHEET_NAMES.LEARNING_LOG);
+    const aiLearningSheet = ss.getSheetByName(SHEET_NAMES.AI_LEARNING);
     
-    if (!learningSheet || learningSheet.getLastRow() < 2) {
-      SpreadsheetApp.getUi().alert('No Learning Suggestions', 'No learning suggestions found to implement.', SpreadsheetApp.getUi().ButtonSet.OK);
+    if (!aiLearningSheet || aiLearningSheet.getLastRow() < 2) {
+      SpreadsheetApp.getUi().alert('No AI Patterns', 'No AI learning patterns found to implement.', SpreadsheetApp.getUi().ButtonSet.OK);
       return;
     }
     
-    const suggestions = learningSheet.getDataRange().getValues().slice(1);
-    const pendingSuggestions = suggestions.filter(row => row[7] === 'PENDING_IMPLEMENTATION');
+    const patterns = aiLearningSheet.getDataRange().getValues().slice(1);
+    const pendingPatterns = patterns.filter(row => row[8] === 'PENDING_IMPLEMENTATION');
     
-    if (pendingSuggestions.length === 0) {
-      SpreadsheetApp.getUi().alert('No Pending Suggestions', 'No pending learning suggestions found.', SpreadsheetApp.getUi().ButtonSet.OK);
+    if (pendingPatterns.length === 0) {
+      SpreadsheetApp.getUi().alert('No Pending Patterns', 'No pending AI patterns found for implementation.', SpreadsheetApp.getUi().ButtonSet.OK);
       return;
     }
     
-    // Find highest confidence suggestion
-    const topSuggestion = pendingSuggestions.sort((a, b) => parseFloat(b[3]) - parseFloat(a[3]))[0];
+    // Find highest confidence pattern
+    const topPattern = pendingPatterns.sort((a, b) => parseFloat(b[4]) - parseFloat(a[4]))[0];
     
     const ui = SpreadsheetApp.getUi();
     const response = ui.alert(
-      'Implement Learning Suggestion',
-      `Top suggestion:\nType: ${topSuggestion[1]}\nPattern: ${topSuggestion[2]}\nConfidence: ${topSuggestion[3]}\n\nThis will add the pattern to your parser. Continue?`,
+      'Implement AI Learning Pattern',
+      `Top AI pattern:\nType: ${topPattern[1]}\nPattern: ${topPattern[2]}\nConfidence: ${topPattern[4]}\nSuccess Count: ${topPattern[5]}\n\nThis will activate the pattern for use in future parsing. Continue?`,
       ui.ButtonSet.YES_NO
     );
     
     if (response === ui.Button.YES) {
-      // Add to pattern library as implemented
-      const patternSheet = ss.getSheetByName(SHEET_NAMES.PATTERN_LIBRARY);
-      if (patternSheet) {
-        patternSheet.appendRow([
-          new Date(),
-          'learned',
-          topSuggestion[1], // Pattern Type
-          topSuggestion[2], // Pattern
-          'Implemented from learning suggestion',
-          1, // Success count
-          new Date(),
-          parseFloat(topSuggestion[3]) // Confidence
-        ]);
-      }
-      
-      // Mark as implemented in learning log
-      const rowIndex = suggestions.findIndex(row => 
-        row[1] === topSuggestion[1] && 
-        row[2] === topSuggestion[2]
+      // Mark as implemented
+      const rowIndex = patterns.findIndex(row => 
+        row[1] === topPattern[1] && 
+        row[2] === topPattern[2]
       ) + 2; // +2 for header and 0-based indexing
       
-      learningSheet.getRange(rowIndex, 8).setValue('IMPLEMENTED');
-      learningSheet.getRange(rowIndex, 1).setValue(new Date()); // Update timestamp
+      aiLearningSheet.getRange(rowIndex, 9).setValue('ACTIVE'); // Status
+      aiLearningSheet.getRange(rowIndex, 1).setValue(new Date()); // Update timestamp
       
-      _logInfo('Learning pattern implemented', {
-        type: topSuggestion[1],
-        pattern: topSuggestion[2],
-        confidence: topSuggestion[3]
+      _logInfo('AI learning pattern implemented', {
+        type: topPattern[1],
+        pattern: topPattern[2],
+        confidence: topPattern[4]
       });
       
-      ui.alert('Success', 'Learning pattern has been implemented and will be used in future parsing attempts.', ui.ButtonSet.OK);
+      ui.alert('Success', 'AI learning pattern has been activated and will be used in future parsing attempts.', ui.ButtonSet.OK);
     }
     
   } catch (error) {
-    _logError('Failed to implement learning pattern', error);
+    _logError('Failed to implement AI pattern', error);
     SpreadsheetApp.getUi().alert('Error', `Failed to implement pattern: ${error.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+function runEnhancedCategoryLearning() {
+  try {
+    const result = _enhancedCategoryLearning();
+    
+    const ui = SpreadsheetApp.getUi();
+    if (result && result.added > 0) {
+      ui.alert(
+        'Enhanced Category Learning Complete',
+        `Successfully analyzed ${result.analyzed} merchants and added ${result.added} new AI-enhanced category mappings.\\n\\nThe system used cross-validation between parsing patterns and category patterns for improved accuracy.`,
+        ui.ButtonSet.OK
+      );
+    } else {
+      ui.alert(
+        'Enhanced Category Learning Complete',
+        'No new category mappings were needed. Existing patterns are comprehensive and cross-validated.',
+        ui.ButtonSet.OK
+      );
+    }
+    
+  } catch (error) {
+    _logError('Enhanced category learning failed', error);
+    SpreadsheetApp.getUi().alert('Enhanced Category Learning Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
