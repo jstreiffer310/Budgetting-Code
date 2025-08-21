@@ -876,10 +876,10 @@ function _enhanceMerchantName(rawMerchant, senderId) {
   return cleaned || rawMerchant;
 }
 
-// ===================== UNIFIED AI LEARNING FRAMEWORK =====================
+// ===================== LEARNING FRAMEWORK =====================
 
 /**
- * Unified AI Learning System that combines:
+ * Learning System that combines:
  * 1. Email parsing pattern learning
  * 2. Category classification learning 
  * 3. Cross-validation between systems for improved accuracy
@@ -1054,7 +1054,7 @@ function _calculateCrossValidationConfidence(merchantPattern, categoryPatterns) 
  */
 function _enhancedCategoryLearning() {
   try {
-    _logInfo('Starting unified AI category learning...');
+    _logInfo('Starting category learning...');
     
     const ss = _ss();
     const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
@@ -1173,7 +1173,7 @@ function _enhancedCategoryLearning() {
         addedCount++;
       });
     
-    _logInfo(`Enhanced AI category learning completed: ${addedCount} new mappings added`);
+    _logInfo(`Category learning completed: ${addedCount} new mappings added`);
     
     return { added: addedCount, analyzed: Object.keys(merchantAnalysis).length };
     
@@ -1292,7 +1292,7 @@ function _generateAIFailureAnalysis(subject, body, attemptedParsers) {
 }
 
 /**
- * Enhanced parsing with unified AI learning
+ * Enhanced parsing with learning system
  */
 function _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet) {
   const attemptedParsers = [];
@@ -1307,7 +1307,7 @@ function _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet) 
       transaction = _parseEmailWithSenderContext(message, subject, body, accountsSheet);
       
       if (transaction) {
-        // Record successful patterns in unified AI system
+        // Record successful patterns in learning system
         _recordAILearning(AI_LEARNING_TYPES.SENDER_IDENTIFICATION, sender.id, message.getFrom(), 0.9, {
           domain: message.getFrom().split('@')[1],
           confidence: sender.confidence
@@ -1331,7 +1331,7 @@ function _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet) 
       }
     }
     
-    // If standard parsing failed, try unified AI patterns
+    // If standard parsing failed, try learned patterns
     transaction = _tryUnifiedAIPatterns(message, subject, body, attemptedParsers);
     
     if (transaction) {
@@ -1365,7 +1365,7 @@ function _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet) 
 }
 
 /**
- * Try parsing using unified AI patterns
+ * Try parsing using learned patterns
  */
 function _tryUnifiedAIPatterns(message, subject, body, attemptedParsers) {
   try {
@@ -4414,7 +4414,7 @@ function analyzeLearningData() {
     
     // Show report in UI
     const ui = SpreadsheetApp.getUi();
-    ui.alert('Unified AI Learning Analysis', report, ui.ButtonSet.OK);
+    ui.alert('Learning System Analysis', report, ui.ButtonSet.OK);
     
     return report;
     
@@ -4430,7 +4430,7 @@ function implementTopAIPattern() {
     const aiLearningSheet = ss.getSheetByName(SHEET_NAMES.AI_LEARNING);
     
     if (!aiLearningSheet || aiLearningSheet.getLastRow() < 2) {
-      SpreadsheetApp.getUi().alert('No AI Patterns', 'No AI learning patterns found to implement.', SpreadsheetApp.getUi().ButtonSet.OK);
+      SpreadsheetApp.getUi().alert('No Learning Patterns', 'No learning patterns found to implement.', SpreadsheetApp.getUi().ButtonSet.OK);
       return;
     }
     
@@ -4438,7 +4438,7 @@ function implementTopAIPattern() {
     const pendingPatterns = patterns.filter(row => row[8] === 'PENDING_IMPLEMENTATION');
     
     if (pendingPatterns.length === 0) {
-      SpreadsheetApp.getUi().alert('No Pending Patterns', 'No pending AI patterns found for implementation.', SpreadsheetApp.getUi().ButtonSet.OK);
+      SpreadsheetApp.getUi().alert('No Pending Patterns', 'No pending patterns found for implementation.', SpreadsheetApp.getUi().ButtonSet.OK);
       return;
     }
     
@@ -4468,7 +4468,7 @@ function implementTopAIPattern() {
         confidence: topPattern[4]
       });
       
-      ui.alert('Success', 'AI learning pattern has been activated and will be used in future parsing attempts.', ui.ButtonSet.OK);
+      ui.alert('Success', 'Learning pattern has been activated and will be used in future parsing attempts.', ui.ButtonSet.OK);
     }
     
   } catch (error) {
@@ -4498,7 +4498,7 @@ function runEnhancedCategoryLearning() {
     
   } catch (error) {
     _logError('Enhanced category learning failed', error);
-    SpreadsheetApp.getUi().alert('Enhanced Category Learning Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    SpreadsheetApp.getUi().alert('Category Learning Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
