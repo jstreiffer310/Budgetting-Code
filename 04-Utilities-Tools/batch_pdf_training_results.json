@@ -1,0 +1,171 @@
+{
+  "processed_files": [
+    {
+      "file": "onlineStatement (1).pdf",
+      "transactions": 33,
+      "processed_at": "2025-08-21T14:06:31.919420"
+    },
+    {
+      "file": "onlineStatement (10).pdf",
+      "transactions": 41,
+      "processed_at": "2025-08-21T14:06:33.085990"
+    },
+    {
+      "file": "onlineStatement (11).pdf",
+      "transactions": 35,
+      "processed_at": "2025-08-21T14:06:34.180512"
+    },
+    {
+      "file": "onlineStatement (12).pdf",
+      "transactions": 29,
+      "processed_at": "2025-08-21T14:06:35.045409"
+    },
+    {
+      "file": "onlineStatement (13).pdf",
+      "transactions": 55,
+      "processed_at": "2025-08-21T14:06:36.421529"
+    },
+    {
+      "file": "onlineStatement (14).pdf",
+      "transactions": 54,
+      "processed_at": "2025-08-21T14:06:37.895323"
+    },
+    {
+      "file": "onlineStatement (15).pdf",
+      "transactions": 47,
+      "processed_at": "2025-08-21T14:06:39.193225"
+    },
+    {
+      "file": "onlineStatement (16).pdf",
+      "transactions": 42,
+      "processed_at": "2025-08-21T14:06:40.400382"
+    },
+    {
+      "file": "onlineStatement (17).pdf",
+      "transactions": 32,
+      "processed_at": "2025-08-21T14:06:41.403281"
+    },
+    {
+      "file": "onlineStatement (2).pdf",
+      "transactions": 31,
+      "processed_at": "2025-08-21T14:06:42.561700"
+    },
+    {
+      "file": "onlineStatement (3).pdf",
+      "transactions": 49,
+      "processed_at": "2025-08-21T14:06:45.302129"
+    },
+    {
+      "file": "onlineStatement (4).pdf",
+      "transactions": 34,
+      "processed_at": "2025-08-21T14:06:46.823815"
+    },
+    {
+      "file": "onlineStatement (5).pdf",
+      "transactions": 45,
+      "processed_at": "2025-08-21T14:06:48.100757"
+    },
+    {
+      "file": "onlineStatement (6).pdf",
+      "transactions": 60,
+      "processed_at": "2025-08-21T14:06:49.534635"
+    },
+    {
+      "file": "onlineStatement (7).pdf",
+      "transactions": 9,
+      "processed_at": "2025-08-21T14:06:50.084820"
+    },
+    {
+      "file": "onlineStatement (8).pdf",
+      "transactions": 54,
+      "processed_at": "2025-08-21T14:06:51.496787"
+    },
+    {
+      "file": "onlineStatement (9).pdf",
+      "transactions": 29,
+      "processed_at": "2025-08-21T14:06:52.472253"
+    }
+  ],
+  "failed_files": [
+    {
+      "file": "onlineStatement (18).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:41.597706"
+    },
+    {
+      "file": "onlineStatement (19).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:41.711607"
+    },
+    {
+      "file": "onlineStatement (20).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:42.742932"
+    },
+    {
+      "file": "onlineStatement (21).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:42.844959"
+    },
+    {
+      "file": "onlineStatement (22).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:42.973526"
+    },
+    {
+      "file": "onlineStatement (23).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:43.099985"
+    },
+    {
+      "file": "onlineStatement (24).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:43.267858"
+    },
+    {
+      "file": "onlineStatement (25).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:43.408901"
+    },
+    {
+      "file": "onlineStatement (26).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:43.549830"
+    },
+    {
+      "file": "onlineStatement (27).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:43.686274"
+    },
+    {
+      "file": "onlineStatement (28).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:43.832433"
+    },
+    {
+      "file": "onlineStatement (29).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:43.962324"
+    },
+    {
+      "file": "onlineStatement (30).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:45.571292"
+    },
+    {
+      "file": "onlineStatement (31).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:45.722709"
+    },
+    {
+      "file": "onlineStatement (32).pdf",
+      "error": "No transactions found",
+      "failed_at": "2025-08-21T14:06:45.840660"
+    }
+  ],
+  "total_transactions": 679,
+  "merchant_mappings": {},
+  "category_distribution": {},
+  "confidence_stats": {},
+  "training_quality": {}
+}

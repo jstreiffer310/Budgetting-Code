@@ -1,0 +1,485 @@
+{
+  "merchant_patterns": {
+    "ROYAL BANK": "Banking",
+    "SMOKE&CIGAR&GLASS RICHMOND": "Personal Care",
+    "ANTHONY'S NO": "Groceries",
+    "TIM HORTONS": "Restaurants",
+    "WIMPY'S DINER": "Restaurants",
+    "UBER CANADA/UBEREATS": "Restaurants",
+    "ACEVAPER RICHMOND": "Personal Care",
+    "PAYPAL *STEAM": "Entertainment",
+    "SHOPPERS DRUG": "Groceries",
+    "DOLLARAMA #1257": "Groceries",
+    "DQ GRILL": "Restaurants",
+    "CANNA CABANA": "Healthcare",
+    "COBS Bread": "Other",
+    "ESSO CIRCLE": "Transportation",
+    "THE K": "Restaurants",
+    "WENDY'S LANGSTAFF": "Restaurants",
+    "WWW.SHERIVANDIJK.COM CHURCHILL": "Healthcare",
+    "CANADIAN ZIONIST": "Healthcare",
+    "ROGERS ******3035": "Utilities",
+    "MENS PELVIC": "Healthcare",
+    "MCDONALD'S #40729": "Restaurants",
+    "ANNUAL FEE": "Professional Services",
+    "PETSMART INC.": "Other",
+    "SHANGHAI 360": "Restaurants",
+    "LCBO/RAO #0523": "Groceries",
+    "MCDONALD'S #10988": "Restaurants",
+    "AMAZON* RK5I90XI0": "Shopping",
+    "AMAZON* RK6ND3XH0": "Shopping",
+    "Amazon.ca*RK6V91X00 AMAZON.CA": "Shopping",
+    "McDonalds 40330": "Restaurants",
+    "TST-Snakes Lattes": "Restaurants",
+    "THE TICKLED": "Restaurants",
+    "Maya Mobile": "Other",
+    "PUFF N": "Other",
+    "SHAKE SHACK": "Other",
+    "PETRO CANADA65050": "Transportation",
+    "AMZN Mktp": "Shopping",
+    "BARBURRITO MEXICAN": "Restaurants",
+    "ULTRA CONVENICENCE": "Other",
+    "TBJ CONCESSIONS": "Restaurants",
+    "Fogtown Flower": "Healthcare",
+    "MR.SUB THORNHILL": "Restaurants",
+    "SHERI VAN": "Healthcare",
+    "UBER CANADA/UBERTRIP": "Transportation",
+    "A&W #4487": "Restaurants",
+    "AMAZON* 701-6429080-40": "Shopping",
+    "DON HEAD": "Other",
+    "THAI EXPRESS": "Restaurants",
+    "PAYPAL *LOGINCANADA": "Entertainment",
+    "1824-TOR RELAY": "Other",
+    "AC ROUGE": "Restaurants",
+    "Amazon.ca*WR7EG4273 AMAZON.CA": "Shopping",
+    "PAYPAL *GRAMMARLY": "Entertainment",
+    "MTO E-COMMERCE": "Other",
+    "THE CANNABIS": "Healthcare",
+    "STARBUCKS 04743": "Restaurants",
+    "Amazon.ca*YE52Z44W3 AMAZON.CA": "Shopping",
+    "PRESTO MOBI/55FC27HTQ2": "Transportation",
+    "WENDY'S RESTAURANT": "Restaurants",
+    "OSMOW'S BRAMPTON": "Restaurants",
+    "BROTHERS CONVENIENCE": "Other",
+    "GEORGE'S CONVENIENCE": "Other",
+    "SQ *FRANK": "Restaurants",
+    "FI HAIR": "Other",
+    "ONEEAST-NORTH YORK-23782": "Restaurants",
+    "UBER CANADA/UBERONE": "Other",
+    "WINNERSHOMESENSE 20301": "Other",
+    "THE HOME": "Groceries",
+    "LCBO/RAO #635": "Groceries",
+    "WAL-MART SUPERCENTER#1116RICHMOND": "Other",
+    "A&W RICHMOND": "Restaurants",
+    "MARK'S STORE": "Other",
+    "EMILY'S PALACE": "Restaurants",
+    "LCBO/RAO #542": "Groceries",
+    "WENDY'S RESTAURANTS": "Restaurants",
+    "ONTARIO GLAZING": "Other",
+    "CUMBERLAND CANNABIS": "Healthcare",
+    "UBER* TRIP": "Other",
+    "LONGO'S #": "Other",
+    "HIBUZZ INC.": "Healthcare",
+    "Amazon.ca*RA4HT0GG1 AMAZON.CA": "Shopping",
+    "SUSHI SHOP": "Restaurants",
+    "THORNHILL DENTAL": "Healthcare",
+    "BOURBON ST": "Restaurants",
+    "DRAGON VAPE": "Personal Care",
+    "1344PEPVEN8003876683 MISSISSAUGA": "Restaurants",
+    "VAPE 123": "Personal Care",
+    "INTUIT *TURBOTAX": "Other",
+    "EAT BKK": "Restaurants",
+    "PETRO CANADA00784": "Transportation",
+    "SOUL CANNABIS": "Healthcare",
+    "Cookies TORONTO": "Healthcare",
+    "Amazon.ca*R83TC6IG1 AMAZON.CA": "Shopping",
+    "Amazon.ca*R05XO3F92 AMAZON.CA": "Shopping",
+    "HONK PARKING": "Other",
+    "PRESTO MOBL": "Transportation",
+    "WAL-MART SUPERCENTER#5831THORNHILL": "Other",
+    "STAPLES/BUSINESS DEPOT": "Other",
+    "Shelbyscanada_20 Brampton": "Restaurants",
+    "HOPP/O/2504040230 Toronto": "Other",
+    "MONTANAS 3011": "Restaurants",
+    "DOMINOS PIZZA": "Restaurants",
+    "FIKA SUPPLY": "Healthcare",
+    "BAGS AWAY": "Professional Services",
+    "Fogtown FL": "Healthcare",
+    "PPL 685": "Other",
+    "MCDONALD'S #29062": "Restaurants",
+    "IKEA VAUGHAN": "Other",
+    "VALUE VILLAGE": "Other",
+    "HOPP/O/2505090222 Toronto": "Other",
+    "Amazon.ca*NW79H1LZ2 AMAZON.CA": "Shopping",
+    "SLS BRAMPTON": "Restaurants",
+    "NYF3406 VAUGHAN": "Restaurants",
+    "ONE PLANT": "Healthcare",
+    "EAST SIDE": "Restaurants",
+    "TMU STUDENT": "Restaurants",
+    "OSMOW'S SHAWARMA": "Restaurants",
+    "STARBUCKS COFFEE": "Restaurants",
+    "PAYPAL *MAYAVIRTUAL": "Entertainment",
+    "RAINBOW GROCERY": "Other",
+    "PRYTANIA MART": "Other",
+    "FIVE STAR": "Professional Services",
+    "ITALIAN ICE": "Other",
+    "FALLS CONVENIENCE": "Other",
+    "WENDY?S RESTAURANT": "Restaurants",
+    "DR HITEN": "Healthcare",
+    "MAGIC NOODLE": "Restaurants",
+    "GRAINGER CANADA": "Professional Services",
+    "MELTWICH #107": "Restaurants",
+    "IL FORNELLO": "Restaurants",
+    "IMAGINE CINEMAS": "Entertainment",
+    "PAYPAL *GOOGLE": "Entertainment",
+    "CANADA COMPUTERS": "Other",
+    "CANADIAN TIRE": "Groceries",
+    "WENDY'S #6485": "Restaurants",
+    "MCDONALD'S #40342": "Restaurants",
+    "WAL-MART SUPERCENTER#1079BRAMPTON": "Other",
+    "FRESHCO #3860": "Groceries",
+    "A&W #4596": "Restaurants",
+    "MACKENZIE HEALTH": "Healthcare",
+    "STAPLES STORE": "Other",
+    "EBOOKYORKUNIVERSITY KINGSTON": "Other",
+    "McDonalds 29062": "Restaurants",
+    "MELTWICH FOOD": "Restaurants",
+    "SKIPTHEDISHES WINNIPEG": "Restaurants",
+    "MANCHU WOK": "Restaurants",
+    "ROOTS PROMENADE": "Shopping",
+    "BLUENOTES #9368": "Other",
+    "DISERA VAPES": "Personal Care",
+    "GATEWAY NEWSTANDS": "Other",
+    "PRESTO MOBI/5FF866LR8Q": "Transportation",
+    "PRESTO MOBI/5FF86HKLZV": "Transportation",
+    "MCDONALD'S #5260": "Restaurants",
+    "TARGET PARK": "Other",
+    "MCDONALD'S #29186": "Restaurants",
+    "GRAB AND": "Other",
+    "BATH &": "Other",
+    "URBAN PLANET": "Shopping",
+    "NEW YORK": "Restaurants",
+    "Amazon.ca*K86ZD3ZH3 AMAZON.CA": "Shopping",
+    "HARVEY'S #2768": "Restaurants",
+    "Amazon.ca*CF2WB0Y23 AMAZON.CA": "Shopping",
+    "TURTLE JACK'S": "Restaurants"
+  },
+  "category_distribution": {
+    "Banking": 5,
+    "Personal Care": 32,
+    "Groceries": 113,
+    "Restaurants": 120,
+    "Entertainment": 13,
+    "Healthcare": 63,
+    "Other": 76,
+    "Transportation": 46,
+    "Utilities": 17,
+    "Professional Services": 4,
+    "Shopping": 36
+  },
+  "total_merchants": 163,
+  "sample_transactions": [
+    {
+      "description": "ROYAL BANK OF CANADA MONTREAL",
+      "category": "Banking",
+      "merchant": "ROYAL BANK",
+      "amount": 160.82
+    },
+    {
+      "description": "SMOKE&CIGAR&GLASS RICHMOND HILLON Retail and Grocery",
+      "category": "Personal Care",
+      "merchant": "SMOKE&CIGAR&GLASS RICHMOND",
+      "amount": 28.25
+    },
+    {
+      "description": "ANTHONY'S NO FRILLS #3 VAUGHAN ON Retail and Grocery",
+      "category": "Groceries",
+      "merchant": "ANTHONY'S NO",
+      "amount": 4.99
+    },
+    {
+      "description": "TIM HORTONS #2049 CONCORD ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "TIM HORTONS",
+      "amount": 5.64
+    },
+    {
+      "description": "WIMPY'S DINER THORNHILL ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "WIMPY'S DINER",
+      "amount": 59.27
+    },
+    {
+      "description": "UBER CANADA/UBEREATS TORONTO ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "UBER CANADA/UBEREATS",
+      "amount": 45.84
+    },
+    {
+      "description": "ACEVAPER RICHMOND HILLON Home and Office Improvement",
+      "category": "Personal Care",
+      "merchant": "ACEVAPER RICHMOND",
+      "amount": 38.05
+    },
+    {
+      "description": "ROYAL BANK OF CANADA MONTREAL",
+      "category": "Banking",
+      "merchant": "ROYAL BANK",
+      "amount": 252.16
+    },
+    {
+      "description": "PAYPAL *STEAM GAMES 35314369001 Retail and Grocery",
+      "category": "Entertainment",
+      "merchant": "PAYPAL *STEAM",
+      "amount": 29.37
+    },
+    {
+      "description": "SHOPPERS DRUG MART #96 THORNHILL ON Health and Education",
+      "category": "Groceries",
+      "merchant": "SHOPPERS DRUG",
+      "amount": 102.82
+    },
+    {
+      "description": "DOLLARAMA #1257 BRAMPTON ON Retail and Grocery",
+      "category": "Groceries",
+      "merchant": "DOLLARAMA #1257",
+      "amount": 11.58
+    },
+    {
+      "description": "DQ GRILL & CHILL #12326 BRAMPTON ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "DQ GRILL",
+      "amount": 18.84
+    },
+    {
+      "description": "CANNA CABANA BATHURST & SNORTH YORK ON Health and Education",
+      "category": "Healthcare",
+      "merchant": "CANNA CABANA",
+      "amount": 27.46
+    },
+    {
+      "description": "CANNA CABANA BATHURST & SNORTH YORK ON Health and Education",
+      "category": "Healthcare",
+      "merchant": "CANNA CABANA",
+      "amount": 36.06
+    },
+    {
+      "description": "COBS Bread THORNHILL ON Retail and Grocery",
+      "category": "Other",
+      "merchant": "COBS Bread",
+      "amount": 6.0
+    },
+    {
+      "description": "ESSO CIRCLE K THORNHILL ON Transportation",
+      "category": "Transportation",
+      "merchant": "ESSO CIRCLE",
+      "amount": 52.19
+    },
+    {
+      "description": "THE K KARAOKE & BAR TORONTO ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "THE K",
+      "amount": 11.29
+    },
+    {
+      "description": "ACEVAPER RICHMOND HILLON Home and Office Improvement",
+      "category": "Personal Care",
+      "merchant": "ACEVAPER RICHMOND",
+      "amount": 61.77
+    },
+    {
+      "description": "WENDY'S LANGSTAFF QR1 CONCORD ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "WENDY'S LANGSTAFF",
+      "amount": 9.59
+    },
+    {
+      "description": "SHOPPERS DRUG MART #96 THORNHILL ON Health and Education",
+      "category": "Groceries",
+      "merchant": "SHOPPERS DRUG",
+      "amount": 46.87
+    },
+    {
+      "description": "WWW.SHERIVANDIJK.COM CHURCHILL ON Health and Education",
+      "category": "Healthcare",
+      "merchant": "WWW.SHERIVANDIJK.COM CHURCHILL",
+      "amount": 175.0
+    },
+    {
+      "description": "CANADIAN ZIONIST FED NORTH YORK ON Health and Education",
+      "category": "Healthcare",
+      "merchant": "CANADIAN ZIONIST",
+      "amount": 2.0
+    },
+    {
+      "description": "DOLLARAMA #1257 BRAMPTON ON Retail and Grocery",
+      "category": "Groceries",
+      "merchant": "DOLLARAMA #1257",
+      "amount": 20.34
+    },
+    {
+      "description": "ANTHONY'S NO FRILLS #3 VAUGHAN ON Retail and Grocery",
+      "category": "Groceries",
+      "merchant": "ANTHONY'S NO",
+      "amount": 13.95
+    },
+    {
+      "description": "ANTHONY'S NO FRILLS #3 VAUGHAN ON Retail and Grocery",
+      "category": "Groceries",
+      "merchant": "ANTHONY'S NO",
+      "amount": 2.0
+    },
+    {
+      "description": "ROGERS ******3035 888-764-3771 ON Personal and Household Expenses",
+      "category": "Utilities",
+      "merchant": "ROGERS ******3035",
+      "amount": 79.11
+    },
+    {
+      "description": "MENS PELVIC FLOOR PHYS NORTH VANCOUVBC Health and Education",
+      "category": "Healthcare",
+      "merchant": "MENS PELVIC",
+      "amount": 150.0
+    },
+    {
+      "description": "MCDONALD'S #40729 MAPLE ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "MCDONALD'S #40729",
+      "amount": 16.94
+    },
+    {
+      "description": "MENS PELVIC FLOOR PHYS NORTH VANCOUVBC Health and Education",
+      "category": "Healthcare",
+      "merchant": "MENS PELVIC",
+      "amount": 130.0
+    },
+    {
+      "description": "ANNUAL FEE Professional and Financial Services",
+      "category": "Professional Services",
+      "merchant": "ANNUAL FEE",
+      "amount": 139.0
+    },
+    {
+      "description": "PETSMART INC. 1403 RICHMOND HILLON Personal and Household Expenses",
+      "category": "Other",
+      "merchant": "PETSMART INC.",
+      "amount": 7.91
+    },
+    {
+      "description": "UBER CANADA/UBEREATS TORONTO ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "UBER CANADA/UBEREATS",
+      "amount": 55.23
+    },
+    {
+      "description": "SHANGHAI 360 BRAMPTON ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "SHANGHAI 360",
+      "amount": 15.81
+    },
+    {
+      "description": "UBER CANADA/UBEREATS TORONTO ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "UBER CANADA/UBEREATS",
+      "amount": 75.06
+    },
+    {
+      "description": "LCBO/RAO #0523 THORNHILL ON Retail and Grocery",
+      "category": "Groceries",
+      "merchant": "LCBO/RAO #0523",
+      "amount": 34.95
+    },
+    {
+      "description": "WWW.SHERIVANDIJK.COM CHURCHILL ON Health and Education",
+      "category": "Healthcare",
+      "merchant": "WWW.SHERIVANDIJK.COM CHURCHILL",
+      "amount": 175.0
+    },
+    {
+      "description": "UBER CANADA/UBEREATS TORONTO ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "UBER CANADA/UBEREATS",
+      "amount": 47.87
+    },
+    {
+      "description": "ESSO CIRCLE K BRAMPTON ON Transportation",
+      "category": "Transportation",
+      "merchant": "ESSO CIRCLE",
+      "amount": 61.78
+    },
+    {
+      "description": "MCDONALD'S #10988 Q04 CONCORD ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "MCDONALD'S #10988",
+      "amount": 14.45
+    },
+    {
+      "description": "AMAZON* RK5I90XI0 DOWNTOWN TOROON Personal and Household Expenses",
+      "category": "Shopping",
+      "merchant": "AMAZON* RK5I90XI0",
+      "amount": 11.3
+    },
+    {
+      "description": "AMAZON* RK6ND3XH0 DOWNTOWN TOROON Personal and Household Expenses",
+      "category": "Shopping",
+      "merchant": "AMAZON* RK6ND3XH0",
+      "amount": 13.56
+    },
+    {
+      "description": "Amazon.ca*RK6V91X00 AMAZON.CA ON Personal and Household Expenses",
+      "category": "Shopping",
+      "merchant": "Amazon.ca*RK6V91X00 AMAZON.CA",
+      "amount": 11.27
+    },
+    {
+      "description": "McDonalds 40330 RICHMOND HILLON Restaurants",
+      "category": "Restaurants",
+      "merchant": "McDonalds 40330",
+      "amount": 14.57
+    },
+    {
+      "description": "TST-Snakes Lattes Mi Toronto ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "TST-Snakes Lattes",
+      "amount": 98.62
+    },
+    {
+      "description": "THE TICKLED TOAD THORNHILL ON Restaurants",
+      "category": "Restaurants",
+      "merchant": "THE TICKLED",
+      "amount": 15.72
+    },
+    {
+      "description": "ACEVAPER RICHMOND HILLON Home and Office Improvement",
+      "category": "Personal Care",
+      "merchant": "ACEVAPER RICHMOND",
+      "amount": 105.63
+    },
+    {
+      "description": "ESSO CIRCLE K THORNHILL ON Transportation",
+      "category": "Transportation",
+      "merchant": "ESSO CIRCLE",
+      "amount": 68.36
+    },
+    {
+      "description": "SHOPPERS DRUG MART #11 NORTH YORK ON Health and Education",
+      "category": "Groceries",
+      "merchant": "SHOPPERS DRUG",
+      "amount": 14.0
+    },
+    {
+      "description": "ROGERS ******3035 888-764-3771 ON Personal and Household Expenses",
+      "category": "Utilities",
+      "merchant": "ROGERS ******3035",
+      "amount": 82.44
+    },
+    {
+      "description": "WWW.SHERIVANDIJK.COM CHURCHILL ON Health and Education",
+      "category": "Healthcare",
+      "merchant": "WWW.SHERIVANDIJK.COM CHURCHILL",
+      "amount": 175.0
+    }
+  ],
+  "training_source": "CIBC_PDF_Statements",
+  "generated_at": "2025-08-21"
+}
