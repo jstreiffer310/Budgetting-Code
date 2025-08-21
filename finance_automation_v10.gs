@@ -5054,3 +5054,172 @@ function initializeHoldingsData() {
     throw error;
   }
 }
+
+// ===================== DATA EXPORT FOR ANALYSIS =====================
+
+/**
+ * Export all sheet data for external analysis
+ * This creates downloadable JSON files with all your finance data
+ */
+function exportDataForAnalysis() {
+  try {
+    const ss = _ss();
+    const exportData = {
+      metadata: {
+        exportDate: new Date().toISOString(),
+        spreadsheetId: SPREADSHEET_ID,
+        totalSheets: ss.getSheets().length
+      },
+      sheets: {}
+    };
+
+    // Export all relevant sheets
+    const sheetsToExport = [
+      SHEET_NAMES.MAIN,
+      SHEET_NAMES.ACCOUNTS,
+      SHEET_NAMES.CATEGORIES,
+      SHEET_NAMES.AI_LEARNING,
+      SHEET_NAMES.HOLDINGS,
+      SHEET_NAMES.NETWORTH,
+      SHEET_NAMES.DASHBOARD,
+      SHEET_NAMES.STAGING,
+      SHEET_NAMES.FAILED_PARSING
+    ];
+
+    sheetsToExport.forEach(sheetName => {
+      try {
+        const sheet = ss.getSheetByName(sheetName);
+        if (sheet) {
+          const data = sheet.getDataRange().getValues();
+          exportData.sheets[sheetName] = {
+            name: sheetName,
+            rows: data.length,
+            columns: data.length > 0 ? data[0].length : 0,
+            lastUpdated: new Date().toISOString(),
+            data: data
+          };
+          console.log(`✅ Exported ${sheetName}: ${data.length} rows`);
+        }
+      } catch (error) {
+        console.log(`⚠️ Could not export ${sheetName}: ${error.message}`);
+      }
+    });
+
+    // Create the export file content
+    const jsonContent = JSON.stringify(exportData, null, 2);
+    
+    // Log the data (you can copy this from the Apps Script console)
+    console.log('=== FINANCE DATA EXPORT START ===');
+    console.log(jsonContent);
+    console.log('=== FINANCE DATA EXPORT END ===');
+    
+    // Create a summary report
+    const summary = generateExportSummary(exportData);
+    console.log('\n=== EXPORT SUMMARY ===');
+    console.log(summary);
+    
+    // Try to create a downloadable file via Drive API (if available)
+    try {
+      const blob = Utilities.newBlob(jsonContent, 'application/json', 'finance-data-export.json');
+      const file = DriveApp.createFile(blob);
+      console.log(`📁 File created in Google Drive: ${file.getName()}`);
+      console.log(`🔗 File ID: ${file.getId()}`);
+      console.log(`🌐 Download URL: https://drive.google.com/file/d/${file.getId()}/view`);
+    } catch (driveError) {
+      console.log('📋 Drive export failed, but data is logged above for manual copy');
+    }
+
+    SpreadsheetApp.getUi().alert(
+      'Data Export Complete', 
+      `Successfully exported ${Object.keys(exportData.sheets).length} sheets.\n\n` +
+      'Check the Apps Script console (View → Logs) for the complete data.\n' +
+      'You can copy the JSON data from the logs and save it as "finance-data.json" in your project folder.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+
+    return exportData;
+
+  } catch (error) {
+    console.error('Export failed:', error);
+    SpreadsheetApp.getUi().alert('Export Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
+  }
+}
+
+/**
+ * Generate a readable summary of the exported data
+ */
+function generateExportSummary(exportData) {
+  let summary = `Finance Data Export Summary\n`;
+  summary += `Export Date: ${exportData.metadata.exportDate}\n`;
+  summary += `Total Sheets: ${Object.keys(exportData.sheets).length}\n\n`;
+
+  for (const [sheetName, sheetData] of Object.entries(exportData.sheets)) {
+    summary += `📊 ${sheetName}:\n`;
+    summary += `   Rows: ${sheetData.rows}\n`;
+    summary += `   Columns: ${sheetData.columns}\n`;
+    
+    if (sheetData.data.length > 0) {
+      summary += `   Headers: ${sheetData.data[0].join(', ')}\n`;
+      
+      // Add specific insights for each sheet
+      if (sheetName === SHEET_NAMES.MAIN && sheetData.rows > 1) {
+        summary += `   💳 Transactions: ${sheetData.rows - 1}\n`;
+      } else if (sheetName === SHEET_NAMES.AI_LEARNING && sheetData.rows > 1) {
+        summary += `   🧠 Learning Patterns: ${sheetData.rows - 1}\n`;
+      } else if (sheetName === SHEET_NAMES.CATEGORIES && sheetData.rows > 1) {
+        summary += `   🏷️ Categories: ${sheetData.rows - 1}\n`;
+      } else if (sheetName === SHEET_NAMES.ACCOUNTS && sheetData.rows > 1) {
+        summary += `   💰 Accounts: ${sheetData.rows - 1}\n`;
+      }
+    }
+    summary += '\n';
+  }
+
+  return summary;
+}
+
+/**
+ * Quick export function - just the essential data
+ */
+function exportEssentialData() {
+  try {
+    const ss = _ss();
+    const essentialData = {};
+
+    // Export main transactions (last 100)
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    if (mainSheet) {
+      const allData = mainSheet.getDataRange().getValues();
+      essentialData.transactions = {
+        headers: allData[0],
+        recent: allData.slice(-100) // Last 100 transactions
+      };
+    }
+
+    // Export learning data
+    const learningSheet = ss.getSheetByName(SHEET_NAMES.AI_LEARNING);
+    if (learningSheet) {
+      essentialData.learning = learningSheet.getDataRange().getValues();
+    }
+
+    // Export categories
+    const categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    if (categoriesSheet) {
+      essentialData.categories = categoriesSheet.getDataRange().getValues();
+    }
+
+    console.log('=== ESSENTIAL DATA EXPORT ===');
+    console.log(JSON.stringify(essentialData, null, 2));
+    
+    SpreadsheetApp.getUi().alert(
+      'Essential Data Exported', 
+      'Check the Apps Script console for the essential data export.\nCopy the JSON and save as "finance-essential.json"',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+
+  } catch (error) {
+    console.error('Essential export failed:', error);
+    throw error;
+  }
+}
