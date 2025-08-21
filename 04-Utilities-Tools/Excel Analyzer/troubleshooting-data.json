@@ -1,0 +1,54 @@
+{
+  "timestamp": "2025-08-21T03:44:54.365Z",
+  "criticalIssues": [
+    {
+      "type": "DUPLICATE_TRANSACTIONS",
+      "count": 977,
+      "issue": "977 potential duplicate transactions found",
+      "recommendation": "Run duplicate detection: _findAndRemoveDuplicates()"
+    }
+  ],
+  "parsingFailures": [
+    {
+      "reason": "Parsing error: domain is not defined",
+      "count": 8,
+      "severity": "HIGH"
+    }
+  ],
+  "missingTransactions": [],
+  "learningProblems": [
+    {
+      "type": "LOW_CONFIDENCE",
+      "issue": "No high-confidence learning patterns (> 0.8)",
+      "recommendation": "Review learning algorithm - may need more training data or pattern refinement"
+    }
+  ],
+  "recommendations": [
+    {
+      "type": "EMAIL_PARSING",
+      "priority": "HIGH",
+      "issue": "Most parsing failures from: account.pcfinancial.ca (4), intl.paypal.com (2), cibc.com (2)",
+      "action": "Review and enhance email parsing logic for these domains"
+    },
+    {
+      "type": "CATEGORIZATION",
+      "priority": "MEDIUM",
+      "issue": "989 transactions (99.3%) uncategorized",
+      "action": "Improve categorization rules or run learning enhancement"
+    }
+  ],
+  "scriptImprovements": [
+    {
+      "function": "_parsePayPalEmail()",
+      "issue": "2 PayPal parsing failures",
+      "improvement": "\n// Enhanced PayPal parsing - add this to _parsePayPalEmail()\nfunction _parsePayPalEmail(body, subject) {\n  // Check for PC Financial PayPal transactions\n  if (subject.includes('PC Financial') || body.includes('PC Financial')) {\n    const pcFinancialRegex = /\\$([\\d,]+\\.\\d{2})\\s+CAD.*PayPal/i;\n    const match = body.match(pcFinancialRegex);\n    if (match) {\n      return {\n        amount: parseFloat(match[1].replace(',', '')),\n        merchant: 'PayPal via PC Financial',\n        type: 'Debit'\n      };\n    }\n  }\n  // ... existing PayPal logic\n}",
+      "priority": "HIGH"
+    },
+    {
+      "function": "Email parsing functions",
+      "issue": "8 domain extraction errors",
+      "improvement": "\n// Add domain validation - add this helper function\nfunction _extractEmailDomain(fromField) {\n  if (!fromField) return 'unknown';\n  const match = fromField.match(/<([^>]+)>/);\n  const email = match ? match[1] : fromField;\n  const domain = email.split('@')[1];\n  return domain ? domain.toLowerCase() : 'unknown';\n}",
+      "priority": "MEDIUM"
+    }
+  ]
+}

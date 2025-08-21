@@ -395,7 +395,208 @@ async function main() {
 // Export for use as module
 module.exports = ExcelAnalyzer;
 
+// INTEGRATION ENHANCEMENT: Add cross-system integration utilities
+class SystemIntegrationHelper {
+  /**
+   * Check for troubleshooting data and integrate insights
+   */
+  static loadTroubleshootingIntegration() {
+    try {
+      if (fs.existsSync('./troubleshooting-data.json')) {
+        const troubleshootingData = JSON.parse(fs.readFileSync('./troubleshooting-data.json', 'utf8'));
+        console.log('🔧 Troubleshooting integration data loaded');
+        return troubleshootingData;
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not load troubleshooting integration:', error.message);
+    }
+    return null;
+  }
+
+  /**
+   * Enhanced main function with cross-system integration
+   */
+  static async runIntegratedAnalysis() {
+    console.log('🔄 Running integrated system analysis...\n');
+    
+    // Load troubleshooting context
+    const troubleshootingData = this.loadTroubleshootingIntegration();
+    
+    // Find Excel files
+    const files = fs.readdirSync('.').filter(file => file.endsWith('.xlsx') || file.endsWith('.xls'));
+    
+    if (files.length === 0) {
+      console.log('📁 No Excel files found in current directory.');
+      console.log('💡 Place an Excel file in this directory and run again.');
+      return;
+    }
+
+    const excelFile = files[0];
+    console.log(`📊 Analyzing: ${excelFile}`);
+    
+    const analyzer = new ExcelAnalyzer();
+    
+    if (analyzer.loadExcel(excelFile)) {
+      let analysis = analyzer.analyzeFinanceData();
+      
+      // INTEGRATION: Enhance analysis with troubleshooting context
+      if (troubleshootingData) {
+        analysis = this.enhanceAnalysisWithTroubleshooting(analysis, troubleshootingData);
+      }
+      
+      // Export enhanced analysis
+      analyzer.exportAnalysis(analysis, './integrated-analysis.json');
+      
+      // Generate integrated report
+      const report = this.generateIntegratedReport(analysis, troubleshootingData);
+      fs.writeFileSync('./integrated-report.md', report);
+      
+      console.log('\n📊 Integrated analysis complete!');
+      console.log('📄 Files created:');
+      console.log('   - integrated-analysis.json (enhanced data)');
+      console.log('   - integrated-report.md (comprehensive report)');
+      
+      // Display enhanced summary
+      this.displayIntegratedSummary(analysis, troubleshootingData);
+      
+    } else {
+      console.error('❌ Failed to analyze Excel file');
+      process.exit(1);
+    }
+  }
+
+  /**
+   * Enhance analysis with troubleshooting insights
+   */
+  static enhanceAnalysisWithTroubleshooting(analysis, troubleshootingData) {
+    analysis.integrationContext = {
+      troubleshootingTimestamp: troubleshootingData.timestamp,
+      criticalIssues: troubleshootingData.criticalIssues?.length || 0,
+      parsingFailures: troubleshootingData.parsingFailures?.length || 0,
+      learningProblems: troubleshootingData.learningProblems?.length || 0,
+      systemHealth: troubleshootingData.criticalIssues?.length > 0 ? 'CRITICAL' : 'STABLE'
+    };
+
+    // Enhance insights with troubleshooting context
+    if (troubleshootingData.criticalIssues?.length > 0) {
+      analysis.insights.unshift(`🚨 ${troubleshootingData.criticalIssues.length} critical issues require immediate attention`);
+    }
+    
+    if (troubleshootingData.parsingFailures?.length > 0) {
+      analysis.insights.push(`🔍 ${troubleshootingData.parsingFailures.length} parsing failures detected - system efficiency compromised`);
+    }
+
+    if (troubleshootingData.learningProblems?.length > 0) {
+      analysis.insights.push(`🧠 ${troubleshootingData.learningProblems.length} learning system issues found - accuracy may be reduced`);
+    }
+
+    return analysis;
+  }
+
+  /**
+   * Generate comprehensive integrated report
+   */
+  static generateIntegratedReport(analysis, troubleshootingData) {
+    const analyzer = new ExcelAnalyzer();
+    let report = analyzer.generateReport(analysis);
+    
+    if (troubleshootingData) {
+      report += `
+
+# 🔧 System Integration Analysis
+
+This analysis incorporates insights from automated troubleshooting performed on ${new Date(troubleshootingData.timestamp).toLocaleString()}.
+
+## Integration Status
+- **Troubleshooting Integration**: ✅ Active
+- **System Health**: ${analysis.integrationContext?.systemHealth || 'UNKNOWN'}
+- **Cross-system Data Flow**: ✅ Operational
+
+## Critical Findings Integration
+
+### 🚨 Critical Issues (${troubleshootingData.criticalIssues?.length || 0})
+${troubleshootingData.criticalIssues?.map(issue => `- ${typeof issue === 'object' ? issue.issue : issue}`).join('\n') || 'No critical issues detected'}
+
+### 🔍 Parsing System Analysis (${troubleshootingData.parsingFailures?.length || 0} failures)
+${troubleshootingData.parsingFailures?.map(failure => `- ${typeof failure === 'object' ? failure.pattern || failure.issue : failure}`).join('\n') || 'No parsing failures detected'}
+
+### 🧠 Learning System Status (${troubleshootingData.learningProblems?.length || 0} issues)
+${troubleshootingData.learningProblems?.map(problem => `- ${typeof problem === 'object' ? problem.issue : problem}`).join('\n') || 'Learning system operating normally'}
+
+## Recommended Actions
+
+### Immediate (Next 24 hours)
+${troubleshootingData.criticalIssues?.filter(issue => typeof issue === 'object' && issue.priority === 'HIGH').map(issue => `- ${issue.issue}`).join('\n') || '- Monitor system stability'}
+
+### Short-term (Next week)
+${troubleshootingData.recommendations?.slice(0, 3).map(rec => `- ${rec}`).join('\n') || '- Continue regular monitoring'}
+
+### Long-term (Next month)
+- Review and optimize parsing patterns based on failure analysis
+- Enhance learning system accuracy based on identified problems
+- Implement preventive measures for recurring issues
+
+## Integration Workflow
+1. **Troubleshooting Analysis** → Identifies issues and patterns
+2. **Excel Analysis** → Provides data context and validation
+3. **Integrated Report** → Combines insights for actionable intelligence
+4. **Google Apps Script Integration** → Implements fixes automatically
+
+---
+*This integrated analysis ensures comprehensive system health monitoring and proactive issue resolution.*
+`;
+    }
+    
+    return report;
+  }
+
+  /**
+   * Display enhanced summary with integration context
+   */
+  static displayIntegratedSummary(analysis, troubleshootingData) {
+    console.log('\n📋 Integrated Analysis Summary:');
+    
+    // Standard analysis summary
+    analysis.insights.forEach(insight => console.log(`   ${insight}`));
+    
+    console.log(`\n📊 Sheets processed: ${Object.keys(analysis.sheets).length}`);
+    Object.keys(analysis.sheets).forEach(name => 
+      console.log(`   - ${name} (${analysis.sheets[name].rows} rows)`)
+    );
+
+    // Integration-specific summary
+    if (troubleshootingData) {
+      console.log('\n🔧 Integration Context:');
+      console.log(`   - Troubleshooting data: ${new Date(troubleshootingData.timestamp).toLocaleString()}`);
+      console.log(`   - System health: ${analysis.integrationContext?.systemHealth || 'UNKNOWN'}`);
+      console.log(`   - Total issues: ${(troubleshootingData.criticalIssues?.length || 0) + (troubleshootingData.parsingFailures?.length || 0) + (troubleshootingData.learningProblems?.length || 0)}`);
+      
+      if (troubleshootingData.criticalIssues?.length > 0) {
+        console.log('\n🚨 CRITICAL ISSUES REQUIRE IMMEDIATE ATTENTION:');
+        troubleshootingData.criticalIssues.forEach((issue, i) => {
+          const issueText = typeof issue === 'object' ? issue.issue : issue;
+          console.log(`   ${i+1}. ${issueText}`);
+        });
+      }
+    }
+  }
+}
+
+// Enhanced run function for integrated analysis
+async function runIntegratedAnalysis() {
+  return SystemIntegrationHelper.runIntegratedAnalysis();
+}
+
 // Run if called directly
 if (require.main === module) {
-  main().catch(console.error);
+  // Check if troubleshooting integration is available
+  const troubleshootingData = SystemIntegrationHelper.loadTroubleshootingIntegration();
+  
+  if (troubleshootingData) {
+    console.log('🔧 Running integrated analysis with troubleshooting context...');
+    runIntegratedAnalysis().catch(console.error);
+  } else {
+    console.log('📊 Running standard analysis...');
+    main().catch(console.error);
+  }
 }
