@@ -5495,7 +5495,11 @@ function _commitTransaction(transaction, mainSheet, accountsSheet, useHistorical
       source = result.source;
       reason = result.reason;
     } else {
-      category = _categorizeTransaction(transaction);
+      const result = _categorizeTransaction(transaction);
+      category = result.category || result; // Handle both old and new return formats
+      confidence = result.metadata ? result.metadata.confidence : 0.5;
+      source = result.metadata ? result.metadata.final_method : 'legacy';
+      reason = result.metadata ? `Method: ${result.metadata.final_method}, Confidence: ${result.metadata.confidence}` : 'Legacy categorization';
     }
     
     transaction.category = category;
@@ -6125,7 +6129,7 @@ function _findHoldingRow(holdingsSheet, ticker) {
 
 function _categorizeTransaction(transaction) {
   try {
-    if (!transaction) return 'Uncategorized';
+    if (!transaction) return { category: 'Uncategorized', metadata: { method: 'null_transaction', confidence: 0 } };
     
     const searchText = _lc([
       transaction.toAccount || '',
@@ -6133,21 +6137,44 @@ function _categorizeTransaction(transaction) {
       transaction.fromAccount || ''
     ].join(' '));
     
+    // METADATA: Track categorization decision process
+    const categorizationMetadata = {
+      timestamp: new Date(),
+      merchant: _extractCleanMerchantName(transaction.toAccount),
+      amount: Math.abs(parseFloat(transaction.amount || 0)),
+      searchText: searchText,
+      methods_attempted: [],
+      final_method: null,
+      confidence: 0,
+      alternatives: []
+    };
+    
     // First check learned categories from Categories sheet
     const learnedCategory = _getLearnedCategory(transaction);
     if (learnedCategory) {
+      categorizationMetadata.methods_attempted.push('learned_category');
+      categorizationMetadata.final_method = 'learned_category';
+      categorizationMetadata.confidence = 0.95; // High confidence for learned patterns
+      
       _logInfo(`Used learned category for transaction: ${learnedCategory}`);
-      return learnedCategory;
+      _recordCategorizationMetadata(transaction, learnedCategory, categorizationMetadata);
+      return { category: learnedCategory, metadata: categorizationMetadata };
     }
     
     // Enhanced fuzzy matching with contextual rules
+    categorizationMetadata.methods_attempted.push('fuzzy_matching');
     const fuzzyResult = _performFuzzyMatching(transaction, searchText);
     if (fuzzyResult.category && fuzzyResult.confidence >= 0.7) {
+      categorizationMetadata.final_method = `fuzzy_matching_${fuzzyResult.method}`;
+      categorizationMetadata.confidence = fuzzyResult.confidence;
+      
       _logInfo(`Fuzzy matched as ${fuzzyResult.category} (confidence: ${fuzzyResult.confidence}, method: ${fuzzyResult.method})`);
-      return fuzzyResult.category;
+      _recordCategorizationMetadata(transaction, fuzzyResult.category, categorizationMetadata);
+      return { category: fuzzyResult.category, metadata: categorizationMetadata };
     }
     
     // Enhanced merchant pattern matching with confidence scoring
+    categorizationMetadata.methods_attempted.push('merchant_patterns');
     let bestMatch = null;
     let bestConfidence = 0;
     
@@ -6159,53 +6186,341 @@ function _categorizeTransaction(transaction) {
             bestMatch = category;
             bestConfidence = confidence;
           }
+          // Track alternative matches
+          categorizationMetadata.alternatives.push({
+            category: category,
+            confidence: confidence,
+            pattern: pattern.source
+          });
         }
       }
     }
     
     if (bestMatch && bestConfidence >= 0.8) {
+      categorizationMetadata.final_method = 'merchant_pattern_matching';
+      categorizationMetadata.confidence = bestConfidence;
+      
       _logInfo(`Categorized as ${bestMatch} (confidence: ${bestConfidence})`);
-      return bestMatch;
+      _recordCategorizationMetadata(transaction, bestMatch, categorizationMetadata);
+      return { category: bestMatch, metadata: categorizationMetadata };
     }
     
     // Enhanced transaction type detection
+    categorizationMetadata.methods_attempted.push('transaction_type_detection');
     const amount = Math.abs(parseFloat(transaction.amount || 0));
     const toAccount = _lc(transaction.toAccount || '');
     const fromAccount = _lc(transaction.fromAccount || '');
     
     // Investment-related categorization
     if (toAccount.includes('wealthsimple') || fromAccount.includes('wealthsimple')) {
-      if (amount > 100) return 'Investment';
-      return 'Investment Fees';
+      const category = amount > 100 ? 'Investment' : 'Investment Fees';
+      categorizationMetadata.final_method = 'investment_detection';
+      categorizationMetadata.confidence = 0.9;
+      
+      _recordCategorizationMetadata(transaction, category, categorizationMetadata);
+      return { category: category, metadata: categorizationMetadata };
     }
     
     // Transfer detection (improved)
     if (_isInternalAccount(transaction.fromAccount) && _isInternalAccount(transaction.toAccount)) {
-      return 'Internal Transfer';
+      categorizationMetadata.final_method = 'internal_transfer_detection';
+      categorizationMetadata.confidence = 0.95;
+      
+      _recordCategorizationMetadata(transaction, 'Internal Transfer', categorizationMetadata);
+      return { category: 'Internal Transfer', metadata: categorizationMetadata };
     }
     
     // Salary/income detection (enhanced patterns)
     if ((toAccount.includes('payroll') || toAccount.includes('salary') || 
          toAccount.includes('income') || toAccount.includes('pension')) && amount > 500) {
-      return 'Salary';
+      categorizationMetadata.final_method = 'salary_detection';
+      categorizationMetadata.confidence = 0.85;
+      
+      _recordCategorizationMetadata(transaction, 'Salary', categorizationMetadata);
+      return { category: 'Salary', metadata: categorizationMetadata };
     }
     
     // Bill payments and fees
     if (toAccount.includes('fee') || toAccount.includes('charge') || toAccount.includes('penalty')) {
-      return 'Fees';
+      categorizationMetadata.final_method = 'fee_detection';
+      categorizationMetadata.confidence = 0.8;
+      
+      _recordCategorizationMetadata(transaction, 'Fees', categorizationMetadata);
+      return { category: 'Fees', metadata: categorizationMetadata };
     }
     
     // Cash withdrawals
     if (toAccount.includes('atm') || toAccount.includes('cash withdrawal')) {
-      return 'Cash Withdrawal';
+      categorizationMetadata.final_method = 'cash_withdrawal_detection';
+      categorizationMetadata.confidence = 0.9;
+      
+      _recordCategorizationMetadata(transaction, 'Cash Withdrawal', categorizationMetadata);
+      return { category: 'Cash Withdrawal', metadata: categorizationMetadata };
     }
     
-    return 'Uncategorized';
+    // Default uncategorized
+    categorizationMetadata.final_method = 'uncategorized_fallback';
+    categorizationMetadata.confidence = 0;
+    
+    _recordCategorizationMetadata(transaction, 'Uncategorized', categorizationMetadata);
+    return { category: 'Uncategorized', metadata: categorizationMetadata };
     
   } catch (error) {
     _logError('Failed to categorize transaction', error, { transaction });
-    return 'Uncategorized';
+    return { category: 'Uncategorized', metadata: { method: 'error', confidence: 0, error: error.message } };
   }
+}
+
+/**
+ * CATEGORIZATION METADATA RECORDING SYSTEM
+ * =========================================
+ * Records detailed metadata about each categorization decision for:
+ * 1. PDF training validation
+ * 2. Agreement analysis between main script and PDF training
+ * 3. Confidence scoring and method effectiveness tracking
+ * 4. System improvement insights
+ */
+function _recordCategorizationMetadata(transaction, finalCategory, metadata) {
+  try {
+    const metadataSheet = _getOrCreateSheet('Categorization_Metadata', [
+      'Timestamp', 'Transaction_Date', 'Amount', 'Merchant', 'Final_Category', 
+      'Method_Used', 'Confidence', 'Methods_Attempted', 'Alternatives', 
+      'Search_Text', 'Transaction_Fingerprint', 'PDF_Training_Match'
+    ]);
+    
+    // Create transaction fingerprint for tracking
+    const fingerprint = _createTransactionFingerprint(transaction);
+    
+    // Record categorization decision
+    metadataSheet.appendRow([
+      metadata.timestamp,
+      transaction.date || new Date(),
+      metadata.amount,
+      metadata.merchant,
+      finalCategory,
+      metadata.final_method,
+      metadata.confidence,
+      JSON.stringify(metadata.methods_attempted),
+      JSON.stringify(metadata.alternatives),
+      metadata.searchText.substring(0, 100), // Limit text length
+      fingerprint,
+      '' // PDF_Training_Match - to be filled by PDF training validation
+    ]);
+    
+    // Auto-cleanup: Keep only last 1000 records for performance
+    if (metadataSheet.getLastRow() > 1000) {
+      metadataSheet.deleteRows(2, 100); // Remove oldest 100 rows
+    }
+    
+  } catch (error) {
+    _logError('Failed to record categorization metadata', error);
+  }
+}
+
+/**
+ * Create unique fingerprint for transaction to enable PDF training comparison
+ */
+function _createTransactionFingerprint(transaction) {
+  const date = transaction.date ? new Date(transaction.date).toISOString().split('T')[0] : 'unknown';
+  const amount = Math.abs(parseFloat(transaction.amount || 0)).toFixed(2);
+  const merchant = _extractCleanMerchantName(transaction.toAccount || '').substring(0, 20);
+  
+  return `${date}_${amount}_${merchant}`.replace(/[^a-zA-Z0-9_]/g, '');
+}
+
+/**
+ * VALIDATE CATEGORIZATION AGAINST PDF TRAINING DATA
+ * =================================================
+ * This function compares main script categorization decisions against PDF training data
+ * to identify agreement rates, confidence discrepancies, and improvement opportunities
+ */
+function validateCategorizationAgainstPDFTraining() {
+  try {
+    _logInfo('Starting categorization validation against PDF training data...');
+    
+    const ss = _ss();
+    const metadataSheet = ss.getSheetByName('Categorization_Metadata');
+    const analysisSheet = _getOrCreateSheet('PDF_Categorization_Analysis', [
+      'Merchant', 'Main_Script_Category', 'PDF_Training_Category', 'Agreement', 
+      'Main_Confidence', 'PDF_Confidence', 'Recommendation', 'Transaction_Count'
+    ]);
+    
+    if (!metadataSheet || metadataSheet.getLastRow() < 2) {
+      _logWarning('No categorization metadata found');
+      return { status: 'No data to analyze' };
+    }
+    
+    // Check if PDF training data exists
+    let pdfTrainingData = {};
+    try {
+      // Try to load PDF training data (from pdf_training_data.json equivalent)
+      const pdfDataString = _loadPDFTrainingData();
+      if (pdfDataString) {
+        pdfTrainingData = JSON.parse(pdfDataString);
+      }
+    } catch (error) {
+      _logWarning('No PDF training data found for comparison');
+      return { status: 'No PDF training data available' };
+    }
+    
+    // Analyze agreement between main script and PDF training
+    const metadataData = metadataSheet.getDataRange().getValues();
+    const analysisResults = {};
+    
+    // Process each categorization decision
+    for (let i = 1; i < metadataData.length; i++) {
+      const row = metadataData[i];
+      const [timestamp, transDate, amount, merchant, mainCategory, method, confidence] = row;
+      
+      if (!merchant || !mainCategory) continue;
+      
+      // Find matching PDF training data
+      const pdfCategory = _findPDFTrainingMatch(merchant, amount, pdfTrainingData);
+      
+      if (pdfCategory) {
+        const merchantKey = merchant.toLowerCase().trim();
+        
+        if (!analysisResults[merchantKey]) {
+          analysisResults[merchantKey] = {
+            merchant: merchant,
+            mainScriptCategory: mainCategory,
+            pdfTrainingCategory: pdfCategory.category,
+            agreement: mainCategory === pdfCategory.category,
+            mainConfidence: confidence || 0,
+            pdfConfidence: pdfCategory.confidence || 0,
+            transactionCount: 0,
+            recommendations: []
+          };
+        }
+        
+        analysisResults[merchantKey].transactionCount++;
+        
+        // Generate recommendations based on agreement analysis
+        if (!analysisResults[merchantKey].agreement) {
+          if (pdfCategory.confidence > confidence) {
+            analysisResults[merchantKey].recommendations.push('Trust PDF training - higher confidence');
+          } else if (confidence > pdfCategory.confidence) {
+            analysisResults[merchantKey].recommendations.push('Trust main script - higher confidence');
+          } else {
+            analysisResults[merchantKey].recommendations.push('Manual review needed - conflicting categories');
+          }
+        }
+      }
+    }
+    
+    // Write analysis results
+    analysisSheet.clear();
+    analysisSheet.appendRow([
+      'Merchant', 'Main_Script_Category', 'PDF_Training_Category', 'Agreement', 
+      'Main_Confidence', 'PDF_Confidence', 'Recommendation', 'Transaction_Count'
+    ]);
+    
+    let totalComparisons = 0;
+    let agreements = 0;
+    
+    Object.values(analysisResults).forEach(result => {
+      analysisSheet.appendRow([
+        result.merchant,
+        result.mainScriptCategory,
+        result.pdfTrainingCategory,
+        result.agreement ? 'YES' : 'NO',
+        result.mainConfidence,
+        result.pdfConfidence,
+        result.recommendations.join('; '),
+        result.transactionCount
+      ]);
+      
+      totalComparisons++;
+      if (result.agreement) agreements++;
+    });
+    
+    // Calculate agreement rate
+    const agreementRate = totalComparisons > 0 ? (agreements / totalComparisons) * 100 : 0;
+    
+    // Add summary
+    analysisSheet.appendRow(['']);
+    analysisSheet.appendRow(['SUMMARY', '', '', '', '', '', '', '']);
+    analysisSheet.appendRow(['Total Comparisons', totalComparisons, '', '', '', '', '', '']);
+    analysisSheet.appendRow(['Agreements', agreements, '', '', '', '', '', '']);
+    analysisSheet.appendRow(['Agreement Rate', `${agreementRate.toFixed(1)}%`, '', '', '', '', '', '']);
+    
+    _logInfo(`Categorization validation complete. Agreement rate: ${agreementRate.toFixed(1)}%`);
+    
+    return {
+      status: 'Analysis complete',
+      totalComparisons: totalComparisons,
+      agreements: agreements,
+      agreementRate: agreementRate,
+      recommendations: _generateValidationRecommendations(agreementRate, analysisResults)
+    };
+    
+  } catch (error) {
+    _logError('Failed to validate categorization against PDF training', error);
+    return { status: 'Analysis failed', error: error.message };
+  }
+}
+
+/**
+ * Find matching PDF training data for a transaction
+ */
+function _findPDFTrainingMatch(merchant, amount, pdfTrainingData) {
+  if (!pdfTrainingData.merchantMappings) return null;
+  
+  const merchantKey = merchant.toLowerCase().trim();
+  
+  // Direct merchant match
+  if (pdfTrainingData.merchantMappings[merchantKey]) {
+    return pdfTrainingData.merchantMappings[merchantKey];
+  }
+  
+  // Fuzzy merchant match
+  for (const [pdfMerchant, data] of Object.entries(pdfTrainingData.merchantMappings)) {
+    if (_calculateFuzzySimilarity(merchantKey, pdfMerchant) > 0.8) {
+      return data;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Load PDF training data (placeholder - would integrate with actual PDF training system)
+ */
+function _loadPDFTrainingData() {
+  try {
+    // This would load actual PDF training data
+    // For now, return null to indicate no data available
+    return null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Generate recommendations based on validation analysis
+ */
+function _generateValidationRecommendations(agreementRate, analysisResults) {
+  const recommendations = [];
+  
+  if (agreementRate < 70) {
+    recommendations.push('Low agreement rate - consider updating main script categorization rules');
+  } else if (agreementRate < 85) {
+    recommendations.push('Moderate agreement rate - review specific merchant discrepancies');
+  } else {
+    recommendations.push('High agreement rate - system is well-calibrated');
+  }
+  
+  // Find merchants with highest disagreement
+  const disagreements = Object.values(analysisResults)
+    .filter(r => !r.agreement)
+    .sort((a, b) => b.transactionCount - a.transactionCount)
+    .slice(0, 5);
+  
+  if (disagreements.length > 0) {
+    recommendations.push(`Focus on these high-volume disagreements: ${disagreements.map(d => d.merchant).join(', ')}`);
+  }
+  
+  return recommendations;
 }
 
 function _performFuzzyMatching(transaction, searchText) {
@@ -8960,13 +9275,15 @@ function _categorizeTransactionWithHistoricalData(transaction) {
     }
     
     // Step 3: Try existing categorization patterns
-    const existingCategory = _categorizeTransaction(transaction);
+    const existingCategoryResult = _categorizeTransaction(transaction);
+    const existingCategory = existingCategoryResult.category || existingCategoryResult; // Handle both formats
     if (existingCategory && existingCategory !== 'Unknown' && existingCategory !== 'Uncategorized') {
       return {
         category: existingCategory,
-        confidence: 0.5,
-        reason: 'Existing categorization rules',
-        source: 'existing_rules'
+        confidence: existingCategoryResult.metadata ? existingCategoryResult.metadata.confidence : 0.5,
+        reason: existingCategoryResult.metadata ? 
+          `Method: ${existingCategoryResult.metadata.final_method}` : 'Existing categorization rules',
+        source: existingCategoryResult.metadata ? existingCategoryResult.metadata.final_method : 'existing_rules'
       };
     }
     

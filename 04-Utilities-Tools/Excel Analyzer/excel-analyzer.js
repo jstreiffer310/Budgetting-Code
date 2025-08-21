@@ -2,10 +2,16 @@ const XLSX = require('xlsx');
 const fs = require('fs-extra');
 const path = require('path');
 
+// Import PDF training integration
+const PDFTrainingIntegration = require('./pdf-training-integration.js');
+
 class ExcelAnalyzer {
   constructor() {
     this.workbook = null;
     this.sheets = {};
+    
+    // Initialize PDF training integration
+    this.pdfIntegration = new PDFTrainingIntegration(this);
   }
 
   /**
@@ -107,6 +113,11 @@ class ExcelAnalyzer {
 
     // Generate insights based on analysis
     analysis.insights = this.generateStreamlinedInsights(analysis.sheets, analysis.streamlinedSystemDetected);
+
+    // Enhance with PDF training insights if available
+    if (this.pdfIntegration) {
+      analysis = this.pdfIntegration.enhanceAnalysisWithPDFTraining(analysis);
+    }
 
     return analysis;
   }
@@ -625,6 +636,11 @@ Generated: ${new Date().toLocaleString()}
       report += `✅ **Easier Maintenance:** Simplified debugging and troubleshooting\n`;
       report += `✅ **Reduced Complexity:** 2 focused sheets instead of 7+ overlapping ones\n\n`;
       report += `**Action:** Run \`migrateToStreamlinedSystem()\` in Google Apps Script to upgrade.\n`;
+    }
+
+    // Add PDF training integration report
+    if (this.pdfIntegration) {
+      report += this.pdfIntegration.generatePDFIntegrationReport();
     }
 
     return report;
