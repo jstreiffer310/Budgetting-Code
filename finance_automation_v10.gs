@@ -2687,7 +2687,10 @@ function onOpen() {
 
   const debugMenu = ui.createMenu('Debug & Testing')
     .addItem('📋 Show Configuration', 'showConfiguration')
-    .addItem('🧪 Test Email Parsing', 'testEmailParsing');
+    .addItem('🧪 Test Email Parsing', 'testEmailParsing')
+    .addSeparator()
+    .addItem('🔍 Diagnostic Category Analysis', 'diagnosticCategoryLearning')
+    .addItem('🚀 Force Learn Categories (Low Threshold)', 'forceLearnCategoriesLowThreshold');
   menu.addSubMenu(debugMenu);
 
   menu.addToUi();
@@ -2715,8 +2718,153 @@ function updateNetWorth() {
   _updateNetWorth();
 }
 
-function learnCategoriesFromTransactions() {
-  _learnCategoriesFromTransactions();
+function forceLearnCategoriesLowThreshold() {
+  try {
+    _logInfo('Starting FORCED category learning with lowered thresholds...');
+    
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    
+    if (!mainSheet || !categoriesSheet) {
+      SpreadsheetApp.getUi().alert('Required sheets not found for category learning');
+      return;
+    }
+    
+    // Get all transactions
+    const lastRow = mainSheet.getLastRow();
+    if (lastRow < 2) {
+      SpreadsheetApp.getUi().alert('No transactions found for category learning');
+      return;
+    }
+    
+    const data = mainSheet.getRange(2, 1, lastRow - 1, Math.max(mainSheet.getLastColumn(), 10)).getValues();
+    const merchantAnalysis = {};
+    
+    // Analyze transaction patterns with LOWERED thresholds
+    for (const row of data) {
+      if (!row || row.length === 0) continue;
+      
+      const toAccount = row[3] || ''; // Column D: To Account  
+      const category = row[7] || ''; // Column H: Category
+      const amount = Math.abs(parseFloat(row[1] || 0)); // Column B: Amount
+      
+      if (!toAccount || !category || category === 'Uncategorized') continue;
+      
+      const merchant = _extractCleanMerchantName(toAccount);
+      if (!merchant || merchant.length < 3) continue;
+      
+      const merchantKey = merchant.toLowerCase();
+      
+      if (!merchantAnalysis[merchantKey]) {
+        merchantAnalysis[merchantKey] = {
+          originalName: merchant,
+          categories: {},
+          totalTransactions: 0,
+          totalAmount: 0,
+          rawExamples: []
+        };
+      }
+      
+      const analysis = merchantAnalysis[merchantKey];
+      analysis.categories[category] = (analysis.categories[category] || 0) + 1;
+      analysis.totalTransactions++;
+      analysis.totalAmount += amount;
+      analysis.rawExamples.push(toAccount);
+    }
+    
+    // Get existing category mappings
+    const existingMappings = new Set();
+    if (categoriesSheet.getLastRow() > 1) {
+      const existingData = categoriesSheet.getRange(2, 1, categoriesSheet.getLastRow() - 1, 2).getValues();
+      existingData.forEach(row => {
+        if (row[0]) existingMappings.add(row[0].toLowerCase());
+      });
+    }
+    
+    // Create recommendations with LOWERED THRESHOLDS
+    const recommendations = [];
+    
+    for (const [merchantKey, analysis] of Object.entries(merchantAnalysis)) {
+      if (existingMappings.has(merchantKey)) continue;
+      
+      // Calculate confidence metrics with LOWER thresholds
+      const dominantCategory = Object.entries(analysis.categories)
+        .reduce((a, b) => analysis.categories[a[0]] > analysis.categories[b[0]] ? a : b);
+      
+      const confidence = dominantCategory[1] / analysis.totalTransactions;
+      const frequency = analysis.totalTransactions;
+      
+      // LOWERED THRESHOLDS: 50% confidence, 1+ transactions
+      if (confidence >= 0.5 && frequency >= 1) {
+        const score = confidence * frequency;
+        
+        recommendations.push({
+          merchant: analysis.originalName,
+          category: dominantCategory[0],
+          confidence: confidence,
+          frequency: frequency,
+          score: score,
+          examples: analysis.rawExamples.slice(0, 3)
+        });
+      }
+    }
+    
+    // Sort by score and add recommendations
+    recommendations.sort((a, b) => b.score - a.score);
+    
+    let addedCount = 0;
+    const maxRecommendations = 50; // Higher limit for forced learning
+    
+    let report = `FORCED CATEGORY LEARNING REPORT:\n\n`;
+    report += `Total merchants analyzed: ${Object.keys(merchantAnalysis).length}\n`;
+    report += `Existing mappings: ${existingMappings.size}\n`;
+    report += `New recommendations: ${recommendations.length}\n\n`;
+    
+    if (recommendations.length === 0) {
+      report += `❌ NO NEW MAPPINGS FOUND!\n\n`;
+      report += `This could mean:\n`;
+      report += `• All transactions are already 'Uncategorized'\n`;
+      report += `• No clear merchant names could be extracted\n`;
+      report += `• All merchants are already in the Categories sheet\n\n`;
+      report += `Try manually categorizing some transactions first, then run this again.`;
+    } else {
+      report += `TOP RECOMMENDATIONS TO ADD:\n\n`;
+      
+      for (let i = 0; i < Math.min(recommendations.length, maxRecommendations); i++) {
+        const rec = recommendations[i];
+        categoriesSheet.appendRow([rec.merchant, rec.category]);
+        addedCount++;
+        
+        if (i < 10) { // Show first 10 in report
+          report += `✓ ${rec.merchant} → ${rec.category}\n`;
+          report += `  Confidence: ${(rec.confidence * 100).toFixed(1)}% | Frequency: ${rec.frequency}\n`;
+          report += `  Examples: ${rec.examples.slice(0, 2).join(', ')}\n\n`;
+        }
+        
+        _logInfo(`FORCED: Added ${rec.merchant} → ${rec.category} (confidence: ${(rec.confidence * 100).toFixed(1)}%, frequency: ${rec.frequency})`);
+      }
+      
+      if (recommendations.length > 10) {
+        report += `... and ${recommendations.length - 10} more mappings added.\n\n`;
+      }
+    }
+    
+    // Update existing transactions
+    if (addedCount > 0) {
+      _applyCategoryMappingsToTransactions();
+      report += `🔄 Applied new mappings to existing transactions.\n`;
+    }
+    
+    report += `\n📊 SUMMARY: Added ${addedCount} new category mappings with lowered thresholds.`;
+    
+    _logInfo(`FORCED category learning completed: ${addedCount} mappings added`);
+    SpreadsheetApp.getUi().alert('Forced Category Learning Results', report, SpreadsheetApp.getUi().ButtonSet.OK);
+    
+  } catch (error) {
+    _logError('Forced category learning failed', error);
+    SpreadsheetApp.getUi().alert('Forced learning failed: ' + error.message);
+  }
 }
 
 // ===================== FULL AUTOMATION RUNNER =====================
@@ -3361,33 +3509,165 @@ function testShibPriceFetch() {
   }
 }
 
-// Test all crypto prices
-function testAllCryptoPrices() {
+function diagnosticCategoryLearning() {
   try {
-    const cryptos = ['BTC', 'ETH', 'SOL', 'DOT', 'SHIB'];
-    let message = 'Crypto Prices (CAD):\n\n';
+    _logInfo('=== DIAGNOSTIC CATEGORY LEARNING ANALYSIS ===');
     
-    for (const crypto of cryptos) {
-      const price = _fetchCryptoPriceWithPrecision(crypto);
-      message += `${crypto}: $${price.toFixed(8)}\n`;
-      _logInfo(`${crypto} price: $${price.toFixed(8)} CAD`);
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    const categoriesSheet = ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+    
+    if (!mainSheet) {
+      SpreadsheetApp.getUi().alert('Main transactions sheet not found!');
+      return;
     }
     
-    // Test ETFs too
-    const etfs = ['VCE', 'XEQT'];
-    message += '\nETF Prices (CAD):\n\n';
+    // Analyze transaction data
+    const lastRow = mainSheet.getLastRow();
+    _logInfo(`Total rows in main sheet: ${lastRow}`);
     
-    for (const etf of etfs) {
-      const price = _fetchYahooFinancePrice(etf + '.TO');
-      message += `${etf}: $${price.toFixed(2)}\n`;
-      _logInfo(`${etf} price: $${price.toFixed(2)} CAD`);
+    if (lastRow < 2) {
+      SpreadsheetApp.getUi().alert('No transaction data found!\n\nThe main sheet appears to be empty. Try processing some emails first.');
+      return;
     }
     
-    SpreadsheetApp.getUi().alert('Price Test Results', message, SpreadsheetApp.getUi().ButtonSet.OK);
+    const data = mainSheet.getRange(2, 1, lastRow - 1, Math.max(mainSheet.getLastColumn(), 10)).getValues();
+    let totalTransactions = 0;
+    let categorizedCount = 0;
+    let uncategorizedCount = 0;
+    const merchantAnalysis = {};
+    const categoryDistribution = {};
+    
+    // Analyze each transaction
+    for (const row of data) {
+      if (!row || row.length === 0) continue;
+      
+      totalTransactions++;
+      const toAccount = row[3] || ''; // Column D: To Account  
+      const category = row[7] || ''; // Column H: Category
+      
+      // Count categorization status
+      if (!category || category === 'Uncategorized') {
+        uncategorizedCount++;
+      } else {
+        categorizedCount++;
+        categoryDistribution[category] = (categoryDistribution[category] || 0) + 1;
+      }
+      
+      // Analyze merchants
+      if (toAccount) {
+        const merchant = _extractCleanMerchantName(toAccount);
+        if (merchant && merchant.length >= 3) {
+          const merchantKey = merchant.toLowerCase();
+          if (!merchantAnalysis[merchantKey]) {
+            merchantAnalysis[merchantKey] = {
+              originalName: merchant,
+              rawNames: new Set(),
+              categories: {},
+              count: 0
+            };
+          }
+          
+          merchantAnalysis[merchantKey].rawNames.add(toAccount);
+          merchantAnalysis[merchantKey].count++;
+          
+          if (category && category !== 'Uncategorized') {
+            merchantAnalysis[merchantKey].categories[category] = (merchantAnalysis[merchantKey].categories[category] || 0) + 1;
+          }
+        }
+      }
+    }
+    
+    // Analyze existing category mappings
+    let existingMappings = 0;
+    if (categoriesSheet && categoriesSheet.getLastRow() > 1) {
+      existingMappings = categoriesSheet.getLastRow() - 1;
+    }
+    
+    // Find potential new mappings
+    let potentialMappings = 0;
+    let lowFrequencyMerchants = 0;
+    
+    for (const [merchantKey, analysis] of Object.entries(merchantAnalysis)) {
+      if (analysis.count >= 2) {
+        const dominantCategory = Object.entries(analysis.categories)
+          .reduce((a, b) => (analysis.categories[a[0]] || 0) > (analysis.categories[b[0]] || 0) ? a : b, ['', 0]);
+        
+        if (dominantCategory[0] && dominantCategory[1] >= 2) {
+          potentialMappings++;
+        }
+      } else {
+        lowFrequencyMerchants++;
+      }
+    }
+    
+    // Create detailed report
+    let report = `=== CATEGORY LEARNING DIAGNOSTIC REPORT ===\n\n`;
+    report += `📊 TRANSACTION OVERVIEW:\n`;
+    report += `• Total Transactions: ${totalTransactions}\n`;
+    report += `• Categorized: ${categorizedCount} (${(categorizedCount/totalTransactions*100).toFixed(1)}%)\n`;
+    report += `• Uncategorized: ${uncategorizedCount} (${(uncategorizedCount/totalTransactions*100).toFixed(1)}%)\n\n`;
+    
+    report += `🏪 MERCHANT ANALYSIS:\n`;
+    report += `• Unique Merchants Found: ${Object.keys(merchantAnalysis).length}\n`;
+    report += `• Existing Category Mappings: ${existingMappings}\n`;
+    report += `• Potential New Mappings: ${potentialMappings}\n`;
+    report += `• Low Frequency Merchants (1 transaction): ${lowFrequencyMerchants}\n\n`;
+    
+    if (Object.keys(categoryDistribution).length > 0) {
+      report += `📂 CURRENT CATEGORY DISTRIBUTION:\n`;
+      const sortedCategories = Object.entries(categoryDistribution)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 10); // Top 10
+      
+      for (const [category, count] of sortedCategories) {
+        report += `• ${category}: ${count} transactions\n`;
+      }
+      report += `\n`;
+    }
+    
+    // Show top merchants that could be learned
+    const learnableMerchants = Object.entries(merchantAnalysis)
+      .filter(([key, analysis]) => analysis.count >= 2)
+      .sort(([,a], [,b]) => b.count - a.count)
+      .slice(0, 10);
+    
+    if (learnableMerchants.length > 0) {
+      report += `🎯 TOP LEARNABLE MERCHANTS (2+ transactions):\n`;
+      for (const [key, analysis] of learnableMerchants) {
+        const dominantCategory = Object.entries(analysis.categories)
+          .reduce((a, b) => (analysis.categories[a[0]] || 0) > (analysis.categories[b[0]] || 0) ? a : b, ['Uncategorized', 0]);
+        
+        report += `• ${analysis.originalName}: ${analysis.count} transactions → ${dominantCategory[0]}\n`;
+        report += `  Raw names: ${Array.from(analysis.rawNames).slice(0, 2).join(', ')}${analysis.rawNames.size > 2 ? '...' : ''}\n`;
+      }
+      report += `\n`;
+    }
+    
+    // Recommendations
+    report += `💡 RECOMMENDATIONS:\n`;
+    if (uncategorizedCount > 0) {
+      report += `• You have ${uncategorizedCount} uncategorized transactions that could benefit from learning\n`;
+    }
+    if (potentialMappings > 0) {
+      report += `• ${potentialMappings} merchants are ready for category mapping\n`;
+      report += `• Try running 'Learn Categories' again or check the frequency threshold\n`;
+    }
+    if (lowFrequencyMerchants > 0) {
+      report += `• ${lowFrequencyMerchants} merchants appear only once - need more transactions to learn patterns\n`;
+    }
+    if (totalTransactions < 20) {
+      report += `• Consider processing more email transactions to improve learning accuracy\n`;
+    }
+    
+    _logInfo('Diagnostic analysis completed');
+    _logInfo(report);
+    
+    SpreadsheetApp.getUi().alert('Category Learning Diagnostic', report, SpreadsheetApp.getUi().ButtonSet.OK);
     
   } catch (error) {
-    _logError('Failed to test crypto prices', error);
-    SpreadsheetApp.getUi().alert('Error', 'Price test failed. Check execution log.');
+    _logError('Diagnostic category learning failed', error);
+    SpreadsheetApp.getUi().alert('Diagnostic failed: ' + error.message);
   }
 }
 
