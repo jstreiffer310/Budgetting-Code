@@ -3538,16 +3538,20 @@ function testEmailParsing() {
       const messages = threads[i].getMessages();
       const message = messages[messages.length - 1]; // Get latest message
       
-      const parsedData = _parseEmailContent(message.getBody(), message.getSubject());
+      // Get accounts sheet for parsing context
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const accountsSheet = ss.getSheetByName(SHEET_NAMES.ACCOUNTS);
+      
+      const parsedData = _parseEmailWithSenderContext(message, message.getSubject(), message.getBody(), accountsSheet);
       
       results += `Email ${i + 1}:\n`;
       results += `Subject: ${message.getSubject()}\n`;
       results += `From: ${message.getFrom()}\n`;
       results += `Date: ${message.getDate()}\n`;
-      results += `Parsed Amount: ${parsedData.amount || 'Not found'}\n`;
-      results += `Parsed From Account: ${parsedData.fromAccount || 'Not found'}\n`;
-      results += `Parsed To Account: ${parsedData.toAccount || 'Not found'}\n`;
-      results += `Bank: ${parsedData.bank || 'Not detected'}\n\n`;
+      results += `Parsed Amount: ${parsedData ? parsedData.amount : 'Not found'}\n`;
+      results += `Parsed From Account: ${parsedData ? parsedData.fromAccount : 'Not found'}\n`;
+      results += `Parsed To Account: ${parsedData ? parsedData.toAccount : 'Not found'}\n`;
+      results += `Bank: ${parsedData ? parsedData.bank : 'Not detected'}\n\n`;
     }
     
     ui.alert('Email Parsing Test Results', results, ui.ButtonSet.OK);
