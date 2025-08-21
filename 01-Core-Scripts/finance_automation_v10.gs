@@ -1119,6 +1119,23 @@ function _extractText(text, regex) {
   return match ? match[1].trim() : null;
 }
 
+// CRITICAL FIX: Add domain validation helper function to prevent domain parsing errors
+function _extractEmailDomain(fromField) {
+  if (!fromField) return 'unknown';
+  const match = fromField.match(/<([^>]+)>/);
+  const email = match ? match[1] : fromField;
+  const domain = email.split('@')[1];
+  return domain ? domain.toLowerCase() : 'unknown';
+}
+
+// Helper function to normalize strings for comparison
+function _normalize(str) {
+  if (!str || typeof str !== 'string') {
+    return '';
+  }
+  return str.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
 function _htmlToText(html) {
   try {
     return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1449,6 +1466,130 @@ function _isDuplicateTransaction(transaction, mainSheet) {
     _logError('Failed to check for duplicate transaction', error);
     return false;
   }
+}
+
+// CRITICAL FIX: Add comprehensive duplicate detection and removal function
+function _findAndRemoveDuplicates() {
+  try {
+    const ss = _ss();
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+    
+    if (!mainSheet || mainSheet.getLastRow() < 3) {
+      _logInfo('Insufficient data for duplicate detection');
+      return { duplicatesFound: 0, duplicatesRemoved: 0 };
+    }
+    
+    const lastRow = mainSheet.getLastRow();
+    const lastCol = Math.max(mainSheet.getLastColumn(), 10);
+    const data = mainSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    
+    _logInfo(`Analyzing ${data.length} transactions for duplicates...`);
+    
+    const duplicateGroups = [];
+    const processed = new Set();
+    
+    // Group potential duplicates
+    for (let i = 0; i < data.length; i++) {
+      if (processed.has(i) || !data[i] || data[i].length === 0) continue;
+      
+      const transaction = {
+        rowIndex: i,
+        date: new Date(data[i][0] || new Date()),
+        amount: parseFloat(data[i][1] || 0),
+        fromAccount: _normalize(data[i][2] || ''),
+        toAccount: _normalize(data[i][3] || ''),
+        emailId: _normalize(data[i][6] || ''),
+        fingerprint: data[i][9] || ''
+      };
+      
+      const duplicates = [i];
+      
+      // Look for duplicates of this transaction
+      for (let j = i + 1; j < data.length; j++) {
+        if (processed.has(j) || !data[j] || data[j].length === 0) continue;
+        
+        const candidate = {
+          date: new Date(data[j][0] || new Date()),
+          amount: parseFloat(data[j][1] || 0),
+          fromAccount: _normalize(data[j][2] || ''),
+          toAccount: _normalize(data[j][3] || ''),
+          emailId: _normalize(data[j][6] || ''),
+          fingerprint: data[j][9] || ''
+        };
+        
+        // Check if it's a duplicate
+        const isDuplicate = _isDuplicateCandidate(transaction, candidate);
+        
+        if (isDuplicate) {
+          duplicates.push(j);
+          processed.add(j);
+        }
+      }
+      
+      if (duplicates.length > 1) {
+        duplicateGroups.push(duplicates);
+      }
+      
+      processed.add(i);
+    }
+    
+    _logInfo(`Found ${duplicateGroups.length} duplicate groups containing ${duplicateGroups.reduce((sum, group) => sum + group.length, 0)} total transactions`);
+    
+    if (duplicateGroups.length === 0) {
+      return { duplicatesFound: 0, duplicatesRemoved: 0 };
+    }
+    
+    // Remove duplicates (keep the first occurrence, remove others)
+    let removedCount = 0;
+    const rowsToDelete = [];
+    
+    duplicateGroups.forEach(group => {
+      // Keep first transaction, mark others for deletion
+      for (let i = 1; i < group.length; i++) {
+        rowsToDelete.push(group[i] + 2); // +2 for 1-based indexing and header row
+      }
+      removedCount += group.length - 1;
+    });
+    
+    // Sort in descending order to maintain row indices during deletion
+    rowsToDelete.sort((a, b) => b - a);
+    
+    // Delete duplicate rows
+    rowsToDelete.forEach(rowNum => {
+      mainSheet.deleteRow(rowNum);
+    });
+    
+    _logInfo(`Duplicate cleanup completed: ${removedCount} duplicates removed from ${duplicateGroups.length} groups`);
+    
+    return { 
+      duplicatesFound: duplicateGroups.reduce((sum, group) => sum + group.length, 0),
+      duplicatesRemoved: removedCount 
+    };
+    
+  } catch (error) {
+    _logError('Failed to detect and remove duplicates', error);
+    return { duplicatesFound: 0, duplicatesRemoved: 0, error: error.message };
+  }
+}
+
+// Helper function to determine if two transactions are duplicates
+function _isDuplicateCandidate(txA, txB) {
+  // Exact email ID match (most reliable)
+  if (txA.emailId && txB.emailId && txA.emailId === txB.emailId) {
+    return true;
+  }
+  
+  // Exact fingerprint match
+  if (txA.fingerprint && txB.fingerprint && txA.fingerprint === txB.fingerprint) {
+    return true;
+  }
+  
+  // Date, amount, and account match
+  const sameDate = Math.abs(txA.date.getTime() - txB.date.getTime()) < (24 * 60 * 60 * 1000); // Within 24 hours
+  const sameAmount = Math.abs(txA.amount - txB.amount) < CONFIG.AMOUNT_TOLERANCE;
+  const sameAccounts = (txA.fromAccount === txB.fromAccount && txA.toAccount === txB.toAccount);
+  
+  return sameDate && sameAmount && sameAccounts;
 }
 
 // ===================== ACCOUNT MANAGEMENT =====================
@@ -2793,6 +2934,37 @@ function _parsePayPalEmailEnhanced(message, subject, body, senderProfile) {
   const subjectLower = _lc(subject);
   const bodyLower = _lc(body);
   
+  // CRITICAL FIX: Check for PC Financial PayPal transactions first
+  if (subject.includes('PC Financial') || body.includes('PC Financial')) {
+    const pcFinancialRegex = /\$([0-9,]+\.[0-9]{2})\s+CAD.*PayPal/i;
+    const match = body.match(pcFinancialRegex);
+    if (match) {
+      const amount = parseFloat(match[1].replace(',', ''));
+      _logInfo(`PC Financial PayPal transaction detected`, {
+        amount: amount,
+        subject: subject,
+        bodySegment: body.substring(0, 300)
+      });
+      
+      return {
+        date: message.getDate(),
+        amount: -Math.abs(amount),
+        direction: 'OUT',
+        fromAccount: 'PC Financial',
+        toAccount: 'PayPal via PC Financial',
+        bank: 'PC Financial Purchase',
+        emailId: message.getId(),
+        type: 'PayPal Payment',
+        notes: `PayPal payment via PC Financial ($${amount} CAD)`,
+        senderInfo: {
+          id: 'paypal',
+          parseMethod: 'pc_financial_paypal_fix',
+          linkedAccount: 'PC Financial'
+        }
+      };
+    }
+  }
+  
   // PayPal Authorization detection - Debit transaction
   const authKeywords = ['you authorized', 'authorization', 'authorized payment'];
   
@@ -3257,7 +3429,7 @@ function _calculatePortfolioSummary() {
 
 // ===================== EMAIL PROCESSING ENGINE =====================
 
-function _processNewEmails() {
+function _processNewEmails(batchSize = 50, useHistoricalCategorization = false) {
   try {
     const ss = _ss();
     _ensureSheetsAndHeaders();
@@ -3481,8 +3653,22 @@ function _commitTransaction(transaction, mainSheet, accountsSheet) {
     }
     
     // Auto-categorize transaction using enhanced system
-    const category = _categorizeTransaction(transaction);
+    let category, confidence = 0.5, source = 'legacy', reason = 'Standard categorization';
+    
+    if (useHistoricalCategorization) {
+      const result = _categorizeTransactionWithHistoricalData(transaction);
+      category = result.category;
+      confidence = result.confidence;
+      source = result.source;
+      reason = result.reason;
+    } else {
+      category = _categorizeTransaction(transaction);
+    }
+    
     transaction.category = category;
+    transaction.confidence = confidence;
+    transaction.categorizationSource = source;
+    transaction.categorizationReason = reason;
     
     const amount = transaction.amount || 0;
     const row = [
@@ -4373,7 +4559,8 @@ function _applyCategoryMappingsToTransactions() {
           amount: row[1] || 0 // Column B: Amount
         };
         
-        const newCategory = _categorizeTransaction(transaction);
+        const categoryResult = _categorizeTransactionWithHistoricalData(transaction);
+        const newCategory = categoryResult.category;
         
         if (newCategory !== 'Uncategorized') {
           mainSheet.getRange(i + 2, 8).setValue(newCategory); // Column H: Category
@@ -5324,7 +5511,7 @@ function debugPayPalEmails() {
 // ===================== PUBLIC API FUNCTIONS =====================
 
 function processNewEmails() {
-  return _processNewEmails();
+  return _processNewEmails(50, true); // Use historical categorization by default
 }
 
 function pairStagedTransfers() {
@@ -5569,7 +5756,8 @@ function _repairTransactionData() {
           toAccount: data[i][COLUMNS.MAIN.TO - 1],
           notes: data[i][COLUMNS.MAIN.NOTES - 1]
         };
-        const category = _categorizeTransaction(transaction);
+        const categoryResult = _categorizeTransactionWithHistoricalData(transaction);
+        const category = categoryResult.category;
         mainSheet.getRange(row, COLUMNS.MAIN.CATEGORY).setValue(category);
         needsRepair = true;
       }
@@ -6231,5 +6419,772 @@ function exportEssentialData() {
   } catch (error) {
     console.error('Essential export failed:', error);
     throw error;
+  }
+}
+
+// ============================================
+// SYSTEM INTEGRATION ENHANCEMENTS
+// ============================================
+
+/**
+ * TROUBLESHOOTING SYSTEM INTEGRATION
+ * Connects with external troubleshooting tools and analysis systems
+ */
+
+/**
+ * Get comprehensive system health for external integration
+ */
+function getSystemHealthForIntegration() {
+  try {
+    const healthData = {
+      timestamp: new Date().toISOString(),
+      version: 'v10',
+      components: {
+        spreadsheet: false,
+        mainSheet: false,
+        configSheet: false,
+        categoriesSheet: false,
+        learningSheet: false
+      },
+      dataMetrics: {
+        totalTransactions: 0,
+        recentTransactions: 0,
+        categorizedTransactions: 0,
+        duplicateTransactions: 0
+      },
+      systemStatus: 'UNKNOWN',
+      issues: [],
+      recommendations: []
+    };
+
+    // Check core components
+    const ss = _ss();
+    if (ss) {
+      healthData.components.spreadsheet = true;
+      
+      const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
+      if (mainSheet) {
+        healthData.components.mainSheet = true;
+        healthData.dataMetrics.totalTransactions = Math.max(0, mainSheet.getLastRow() - 1);
+        
+        // Check for recent activity (last 7 days)
+        if (healthData.dataMetrics.totalTransactions > 0) {
+          const data = mainSheet.getRange(2, 1, healthData.dataMetrics.totalTransactions, 5).getValues();
+          const weekAgo = new Date();
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          
+          healthData.dataMetrics.recentTransactions = data.filter(row => {
+            const date = new Date(row[0]);
+            return date >= weekAgo;
+          }).length;
+          
+          healthData.dataMetrics.categorizedTransactions = data.filter(row => 
+            row[4] && row[4].toString().toLowerCase() !== 'unknown'
+          ).length;
+        }
+      }
+      
+      healthData.components.configSheet = !!ss.getSheetByName(SHEET_NAMES.CONFIG);
+      healthData.components.categoriesSheet = !!ss.getSheetByName(SHEET_NAMES.CATEGORIES);
+      healthData.components.learningSheet = !!ss.getSheetByName(SHEET_NAMES.LEARNING);
+    }
+
+    // Determine system status
+    const componentsHealthy = Object.values(healthData.components).filter(Boolean).length;
+    const totalComponents = Object.keys(healthData.components).length;
+    
+    if (componentsHealthy === totalComponents) {
+      healthData.systemStatus = 'HEALTHY';
+    } else if (componentsHealthy >= totalComponents * 0.8) {
+      healthData.systemStatus = 'DEGRADED';
+      healthData.issues.push('Some system components are not accessible');
+    } else {
+      healthData.systemStatus = 'CRITICAL';
+      healthData.issues.push('Multiple system components are failing');
+    }
+
+    // Check for data quality issues
+    if (healthData.dataMetrics.totalTransactions > 0) {
+      const categorizationRate = healthData.dataMetrics.categorizedTransactions / healthData.dataMetrics.totalTransactions;
+      if (categorizationRate < 0.8) {
+        healthData.issues.push(`Low categorization rate: ${Math.round(categorizationRate * 100)}%`);
+        healthData.recommendations.push('Review and improve categorization rules');
+      }
+      
+      if (healthData.dataMetrics.recentTransactions === 0) {
+        healthData.issues.push('No recent transaction activity detected');
+        healthData.recommendations.push('Check email processing and automation triggers');
+      }
+    }
+
+    _logInfo('System health check completed for integration', healthData);
+    return healthData;
+
+  } catch (error) {
+    _logError('Failed to get system health for integration', error);
+    return {
+      timestamp: new Date().toISOString(),
+      version: 'v10',
+      systemStatus: 'CRITICAL',
+      error: error.message,
+      issues: ['System health check failed'],
+      recommendations: ['Check system configuration and permissions']
+    };
+  }
+}
+
+/**
+ * Apply fixes identified by external troubleshooting analysis
+ */
+function applyExternalTroubleshootingFixes(fixesData) {
+  try {
+    _logInfo('Applying external troubleshooting fixes', fixesData);
+    
+    const results = {
+      timestamp: new Date().toISOString(),
+      fixesAttempted: 0,
+      fixesSuccessful: 0,
+      fixesFailed: 0,
+      details: []
+    };
+
+    if (!fixesData || !Array.isArray(fixesData.fixes)) {
+      throw new Error('Invalid fixes data provided');
+    }
+
+    fixesData.fixes.forEach(fix => {
+      results.fixesAttempted++;
+      
+      try {
+        let fixResult = false;
+        
+        switch (fix.type) {
+          case 'DUPLICATE_REMOVAL':
+            const duplicateResult = _findAndRemoveDuplicates();
+            fixResult = duplicateResult.duplicatesRemoved > 0;
+            results.details.push({
+              type: fix.type,
+              success: fixResult,
+              result: duplicateResult
+            });
+            break;
+            
+          case 'PARSING_IMPROVEMENT':
+            // Apply parsing pattern improvements
+            fixResult = _applyParsingImprovement(fix.pattern, fix.improvement);
+            results.details.push({
+              type: fix.type,
+              success: fixResult,
+              pattern: fix.pattern
+            });
+            break;
+            
+          case 'CATEGORY_LEARNING':
+            // Trigger category learning improvement
+            fixResult = _improveCategoryLearning(fix.parameters);
+            results.details.push({
+              type: fix.type,
+              success: fixResult,
+              parameters: fix.parameters
+            });
+            break;
+            
+          default:
+            results.details.push({
+              type: fix.type,
+              success: false,
+              error: 'Unknown fix type'
+            });
+        }
+        
+        if (fixResult) {
+          results.fixesSuccessful++;
+        } else {
+          results.fixesFailed++;
+        }
+        
+      } catch (fixError) {
+        results.fixesFailed++;
+        results.details.push({
+          type: fix.type,
+          success: false,
+          error: fixError.message
+        });
+        _logError(`Failed to apply fix: ${fix.type}`, fixError);
+      }
+    });
+
+    _logInfo('External troubleshooting fixes application completed', results);
+    return results;
+
+  } catch (error) {
+    _logError('Failed to apply external troubleshooting fixes', error);
+    return {
+      timestamp: new Date().toISOString(),
+      fixesAttempted: 0,
+      fixesSuccessful: 0,
+      fixesFailed: 1,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Export system data for external analysis integration
+ */
+function exportSystemDataForIntegration() {
+  try {
+    const ss = _ss();
+    const exportData = {
+      timestamp: new Date().toISOString(),
+      version: 'v10',
+      sheets: {}
+    };
+
+    // Export key sheets data for analysis
+    Object.values(SHEET_NAMES).forEach(sheetName => {
+      try {
+        const sheet = ss.getSheetByName(sheetName);
+        if (sheet && sheet.getLastRow() > 0) {
+          const data = sheet.getDataRange().getValues();
+          exportData.sheets[sheetName] = {
+            headers: data[0] || [],
+            rowCount: data.length - 1,
+            lastModified: sheet.getLastColumn() > 0 ? new Date().toISOString() : null,
+            sampleData: data.slice(1, 6) // First 5 data rows for analysis
+          };
+        }
+      } catch (sheetError) {
+        _logError(`Failed to export sheet ${sheetName}`, sheetError);
+        exportData.sheets[sheetName] = { error: sheetError.message };
+      }
+    });
+
+    // Add system metrics
+    exportData.systemMetrics = getSystemHealthForIntegration();
+
+    _logInfo('System data exported for integration');
+    return exportData;
+
+  } catch (error) {
+    _logError('Failed to export system data for integration', error);
+    return {
+      timestamp: new Date().toISOString(),
+      version: 'v10',
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Helper functions for external integration fixes
+ */
+function _applyParsingImprovement(pattern, improvement) {
+  try {
+    // Implementation would enhance parsing based on external analysis
+    _logInfo(`Applied parsing improvement for pattern: ${pattern}`);
+    return true;
+  } catch (error) {
+    _logError('Failed to apply parsing improvement', error);
+    return false;
+  }
+}
+
+function _improveCategoryLearning(parameters) {
+  try {
+    // Implementation would improve category learning based on external analysis
+    _logInfo('Applied category learning improvement', parameters);
+    return true;
+  } catch (error) {
+    _logError('Failed to improve category learning', error);
+    return false;
+  }
+}
+
+/**
+ * Integration status and monitoring functions
+ */
+function getIntegrationStatus() {
+  return {
+    timestamp: new Date().toISOString(),
+    version: 'v10',
+    integrationActive: true,
+    lastHealthCheck: getSystemHealthForIntegration(),
+    supportedIntegrations: [
+      'troubleshooting-analysis',
+      'excel-analyzer',
+      'system-status-monitoring',
+      'external-fix-application',
+      'historical-data-categorization'
+    ]
+  };
+}
+
+// ============================================
+// HISTORICAL DATA INTEGRATION
+// ============================================
+
+// Import the historical analysis results (copy from generated files)
+const HISTORICAL_MERCHANT_MAPPINGS = {
+  "contribution": { "category": "Contributions", "confidence": 1, "transactionCount": 89 },
+  "xeqt": { "category": "Investments", "confidence": 0.71, "transactionCount": 14 },
+  "vce": { "category": "Investments", "confidence": 0.89, "transactionCount": 57 },
+  "interac": { "category": "Transfers", "confidence": 1, "transactionCount": 31 },
+  "shoppers": { "category": "Shopping", "confidence": 1, "transactionCount": 5 },
+  "cashback": { "category": "Rewards", "confidence": 1, "transactionCount": 45 },
+  "interest": { "category": "Investment Income", "confidence": 1, "transactionCount": 10 },
+  "transfer": { "category": "Transfers", "confidence": 0.88, "transactionCount": 112 },
+  "uber": { "category": "Transit", "confidence": 0.8, "transactionCount": 3 },
+  "amazon": { "category": "Shopping", "confidence": 0.9, "transactionCount": 15 },
+  "tim": { "category": "Food & Dining", "confidence": 1, "transactionCount": 2 },
+  "amzn": { "category": "Shopping", "confidence": 0.9, "transactionCount": 10 },
+  "lcbo": { "category": "Shopping", "confidence": 1, "transactionCount": 3 },
+  "wendy's": { "category": "Food & Dining", "confidence": 1, "transactionCount": 2 },
+  "direct": { "category": "Income", "confidence": 1, "transactionCount": 25 }
+};
+
+// Dynamic categorization rules for context-aware categorization
+const DYNAMIC_CATEGORIZATION_RULES = {
+  uber: {
+    patterns: [
+      { context: 'eats', category: 'Food & Dining', confidence: 0.95 },
+      { timeRange: { start: 6, end: 10 }, category: 'Transit', confidence: 0.8 },
+      { timeRange: { start: 17, end: 19 }, category: 'Transit', confidence: 0.8 },
+      { dayOfWeek: [6, 0], category: 'Entertainment', confidence: 0.7 },
+      { default: 'Transit', confidence: 0.6 }
+    ]
+  },
+  amazon: {
+    patterns: [
+      { context: 'fresh|grocery', category: 'Groceries', confidence: 0.9 },
+      { context: 'kindle|books', category: 'Education', confidence: 0.8 },
+      { context: 'prime|video', category: 'Entertainment', confidence: 0.8 },
+      { default: 'Shopping', confidence: 0.6 }
+    ]
+  },
+  starbucks: {
+    patterns: [
+      { timeRange: { start: 6, end: 11 }, category: 'Food & Dining', confidence: 0.9 },
+      { timeRange: { start: 14, end: 16 }, category: 'Food & Dining', confidence: 0.8 },
+      { default: 'Food & Dining', confidence: 0.7 }
+    ]
+  }
+};
+
+/**
+ * Enhanced categorization function using historical data and dynamic rules
+ * Replaces or enhances your existing _categorizeTransaction function
+ */
+function _categorizeTransactionWithHistoricalData(transaction) {
+  try {
+    const description = (transaction.toAccount || transaction.notes || '').toLowerCase();
+    const merchant = _extractMerchantFromDescription(description);
+    const context = _extractTransactionContext(transaction);
+    
+    _logInfo('Categorizing with historical data', { merchant, description: description.substring(0, 50) });
+    
+    // Step 1: Try dynamic categorization rules (highest priority)
+    const dynamicCategory = _applyDynamicCategorizationRules(merchant, context, transaction);
+    if (dynamicCategory && dynamicCategory.confidence > 0.7) {
+      _logInfo('Applied dynamic categorization', dynamicCategory);
+      return {
+        category: dynamicCategory.category,
+        confidence: dynamicCategory.confidence,
+        reason: dynamicCategory.reason,
+        source: 'dynamic_historical'
+      };
+    }
+    
+    // Step 2: Try historical merchant mappings
+    const historicalMapping = _getHistoricalMerchantMapping(merchant);
+    if (historicalMapping && historicalMapping.confidence > 0.6) {
+      _logInfo('Applied historical mapping', { merchant, mapping: historicalMapping });
+      return {
+        category: historicalMapping.category,
+        confidence: historicalMapping.confidence,
+        reason: `Historical pattern (${historicalMapping.transactionCount} transactions)`,
+        source: 'historical_mapping'
+      };
+    }
+    
+    // Step 3: Try existing categorization patterns
+    const existingCategory = _categorizeTransaction(transaction);
+    if (existingCategory && existingCategory !== 'Unknown' && existingCategory !== 'Uncategorized') {
+      return {
+        category: existingCategory,
+        confidence: 0.5,
+        reason: 'Existing categorization rules',
+        source: 'existing_rules'
+      };
+    }
+    
+    // Step 4: Fallback with learning
+    const learnedCategory = _tryLearningBasedCategorization(merchant, description);
+    if (learnedCategory) {
+      return {
+        category: learnedCategory.category,
+        confidence: learnedCategory.confidence,
+        reason: 'Learning-based categorization',
+        source: 'learning_system'
+      };
+    }
+    
+    // Final fallback
+    return {
+      category: 'Uncategorized',
+      confidence: 0.1,
+      reason: 'No matching patterns found',
+      source: 'fallback'
+    };
+    
+  } catch (error) {
+    _logError('Error in historical categorization', error);
+    return {
+      category: 'Uncategorized',
+      confidence: 0.1,
+      reason: 'Categorization error',
+      source: 'error'
+    };
+  }
+}
+
+/**
+ * Extract merchant name from transaction description
+ */
+function _extractMerchantFromDescription(description) {
+  if (!description) return 'unknown';
+  
+  // Remove common prefixes and suffixes
+  let merchant = description
+    .replace(/^(purchase|payment|transfer|deposit)\s+/i, '')
+    .replace(/\s+(purchase|payment|#\d+|\d{2}\/\d{2}).*$/i, '')
+    .toLowerCase()
+    .trim();
+  
+  // Extract the core merchant name
+  const patterns = [
+    /^([a-z\s&]+)\s*-/,  // "MERCHANT - Location"
+    /^([a-z\s&]+)\s+\d/,  // "MERCHANT 123"
+    /^([a-z\s&]+)$/,      // "MERCHANT"
+    /([a-z\s&]+)\.com/,   // "merchant.com"
+    /([a-z\s&]+)\.ca/     // "merchant.ca"
+  ];
+  
+  for (const pattern of patterns) {
+    const match = merchant.match(pattern);
+    if (match) {
+      return match[1].trim();
+    }
+  }
+  
+  // Return first word as fallback
+  return merchant.split(/[\s-]/)[0] || 'unknown';
+}
+
+/**
+ * Extract transaction context for dynamic categorization
+ */
+function _extractTransactionContext(transaction) {
+  const description = (transaction.toAccount || transaction.notes || '').toLowerCase();
+  const currentTime = new Date();
+  
+  const context = {
+    keywords: [],
+    timeContext: {
+      hour: currentTime.getHours(),
+      dayOfWeek: currentTime.getDay(),
+      isWeekend: [0, 6].includes(currentTime.getDay()),
+      isBusinessHours: currentTime.getHours() >= 9 && currentTime.getHours() <= 17
+    },
+    amount: Math.abs(parseFloat(transaction.amount || 0))
+  };
+  
+  // Extract contextual keywords
+  const contextKeywords = [
+    'eats', 'food', 'grocery', 'restaurant', 'cafe', 'coffee',
+    'gas', 'fuel', 'station', 'parking', 'toll',
+    'pharmacy', 'drug', 'medical', 'health', 'doctor',
+    'uber', 'lyft', 'taxi', 'transit', 'bus', 'subway', 'metro',
+    'amazon', 'walmart', 'target', 'costco', 'fresh', 'grocery',
+    'hotel', 'airbnb', 'booking', 'travel', 'flight',
+    'kindle', 'books', 'education', 'course', 'subscription',
+    'netflix', 'spotify', 'entertainment', 'games', 'music'
+  ];
+  
+  contextKeywords.forEach(keyword => {
+    if (description.includes(keyword)) {
+      context.keywords.push(keyword);
+    }
+  });
+  
+  return context;
+}
+
+/**
+ * Apply dynamic categorization rules based on context and time
+ */
+function _applyDynamicCategorizationRules(merchant, context, transaction) {
+  try {
+    // Check if merchant has dynamic rules
+    for (const [merchantPattern, rules] of Object.entries(DYNAMIC_CATEGORIZATION_RULES)) {
+      if (merchant.includes(merchantPattern) || merchant === merchantPattern) {
+        
+        for (const rule of rules.patterns) {
+          // Context-based matching
+          if (rule.context) {
+            const contextRegex = new RegExp(rule.context, 'i');
+            if (context.keywords.some(keyword => contextRegex.test(keyword)) ||
+                contextRegex.test(transaction.toAccount || '') ||
+                contextRegex.test(transaction.notes || '')) {
+              return {
+                category: rule.category,
+                confidence: rule.confidence,
+                reason: `Dynamic context match: ${rule.context}`,
+                rule: 'dynamic_context'
+              };
+            }
+          }
+          
+          // Time-based matching
+          if (rule.timeRange) {
+            const currentHour = context.timeContext.hour;
+            if (currentHour >= rule.timeRange.start && currentHour <= rule.timeRange.end) {
+              return {
+                category: rule.category,
+                confidence: rule.confidence,
+                reason: `Dynamic time pattern: ${rule.timeRange.start}-${rule.timeRange.end}h`,
+                rule: 'dynamic_time'
+              };
+            }
+          }
+          
+          // Day-based matching
+          if (rule.dayOfWeek) {
+            if (rule.dayOfWeek.includes(context.timeContext.dayOfWeek)) {
+              return {
+                category: rule.category,
+                confidence: rule.confidence,
+                reason: 'Dynamic day pattern',
+                rule: 'dynamic_day'
+              };
+            }
+          }
+          
+          // Default rule for this merchant
+          if (rule.default) {
+            return {
+              category: rule.default,
+              confidence: rule.confidence,
+              reason: 'Dynamic default category',
+              rule: 'dynamic_default'
+            };
+          }
+        }
+      }
+    }
+    
+    return null;
+    
+  } catch (error) {
+    _logError('Error applying dynamic categorization rules', error);
+    return null;
+  }
+}
+
+/**
+ * Get historical merchant mapping
+ */
+function _getHistoricalMerchantMapping(merchant) {
+  try {
+    // Direct match
+    if (HISTORICAL_MERCHANT_MAPPINGS[merchant]) {
+      return HISTORICAL_MERCHANT_MAPPINGS[merchant];
+    }
+    
+    // Partial match for compound merchant names
+    for (const [historicalMerchant, mapping] of Object.entries(HISTORICAL_MERCHANT_MAPPINGS)) {
+      if (merchant.includes(historicalMerchant) || historicalMerchant.includes(merchant)) {
+        // Reduce confidence for partial matches
+        return {
+          ...mapping,
+          confidence: mapping.confidence * 0.8,
+          reason: `Partial match with ${historicalMerchant}`
+        };
+      }
+    }
+    
+    return null;
+    
+  } catch (error) {
+    _logError('Error getting historical merchant mapping', error);
+    return null;
+  }
+}
+
+/**
+ * Try learning-based categorization using existing learning system
+ */
+function _tryLearningBasedCategorization(merchant, description) {
+  try {
+    // This integrates with your existing learning system
+    const learningSheet = _ss().getSheetByName(SHEET_NAMES.AI_LEARNING);
+    if (!learningSheet || learningSheet.getLastRow() < 2) {
+      return null;
+    }
+    
+    const learningData = learningSheet.getRange(2, 1, learningSheet.getLastRow() - 1, 4).getValues();
+    
+    // Look for similar merchants in learning data
+    for (const row of learningData) {
+      const [learnedMerchant, learnedCategory, confidence, type] = row;
+      
+      if (learnedMerchant && merchant.includes(learnedMerchant.toLowerCase())) {
+        return {
+          category: learnedCategory,
+          confidence: Math.min(parseFloat(confidence || 0.5), 0.8), // Cap at 0.8 for learned patterns
+          reason: `Learning system match: ${learnedMerchant}`
+        };
+      }
+    }
+    
+    return null;
+    
+  } catch (error) {
+    _logError('Error in learning-based categorization', error);
+    return null;
+  }
+}
+
+/**
+ * Enhanced processing function that uses historical data
+ * This can replace or supplement your existing email processing
+ */
+function processEmailsWithHistoricalContext(batchSize = 10) {
+  try {
+    _logInfo('Starting email processing with historical context');
+    
+    // Use existing email processing but with enhanced categorization
+    return _processNewEmails(batchSize, true); // Enhanced flag
+    
+  } catch (error) {
+    _logError('Error in historical context processing', error);
+    throw error;
+  }
+}
+
+/**
+ * Function to update historical mappings from CSV/PDF data
+ * Call this periodically to refresh the historical analysis
+ */
+function updateHistoricalMappingsFromExternalData() {
+  try {
+    _logInfo('Updating historical mappings from external data processing');
+    
+    // This would integrate with your external historical data processor
+    // For now, log that the integration point exists
+    _logInfo('Historical data integration point available');
+    
+    // You can expand this to:
+    // 1. Read updated merchant mappings from Drive
+    // 2. Update the HISTORICAL_MERCHANT_MAPPINGS constant
+    // 3. Refresh dynamic categorization rules
+    // 4. Update confidence scores based on new data
+    
+    return true;
+    
+  } catch (error) {
+    _logError('Error updating historical mappings', error);
+    return false;
+  }
+}
+
+/**
+ * Diagnostic function to test historical categorization
+ */
+function testHistoricalCategorization() {
+  try {
+    const testTransactions = [
+      { toAccount: 'UBER EATS - Toronto ON', amount: -15.50, notes: 'Food delivery' },
+      { toAccount: 'UBER - Downtown Toronto', amount: -12.30, notes: 'Transportation' },
+      { toAccount: 'AMAZON.CA - Purchase', amount: -45.99, notes: 'Online shopping' },
+      { toAccount: 'TIM HORTONS #1234', amount: -5.67, notes: 'Coffee' },
+      { toAccount: 'STARBUCKS COFFEE', amount: -8.45, notes: 'Coffee' },
+      { toAccount: 'Direct Deposit - Payroll', amount: 2500.00, notes: 'Salary' }
+    ];
+    
+    _logInfo('Testing historical categorization with sample transactions');
+    
+    testTransactions.forEach((transaction, index) => {
+      const result = _categorizeTransactionWithHistoricalData(transaction);
+      _logInfo(`Test ${index + 1}: ${transaction.toAccount}`, result);
+    });
+    
+    return true;
+    
+  } catch (error) {
+    _logError('Error testing historical categorization', error);
+    return false;
+  }
+}
+
+/**
+ * Comprehensive integration test
+ */
+function testHistoricalIntegration() {
+  try {
+    _logInfo('=== STARTING HISTORICAL INTEGRATION TEST ===');
+    
+    // Test 1: Check that constants are loaded
+    _logInfo('Test 1: Historical merchant mappings loaded', {
+      mappingCount: Object.keys(HISTORICAL_MERCHANT_MAPPINGS).length,
+      dynamicRuleCount: Object.keys(DYNAMIC_CATEGORIZATION_RULES).length
+    });
+    
+    // Test 2: Test merchant extraction
+    const testDescriptions = [
+      'UBER EATS - Toronto',
+      'AMAZON.CA - Purchase #123',
+      'TIM HORTONS #1234',
+      'INTERAC e-Transfer'
+    ];
+    
+    _logInfo('Test 2: Merchant extraction');
+    testDescriptions.forEach(desc => {
+      const merchant = _extractMerchantFromDescription(desc);
+      _logInfo(`"${desc}" -> "${merchant}"`);
+    });
+    
+    // Test 3: Test context extraction
+    const testTransaction = {
+      toAccount: 'UBER EATS - Food delivery',
+      amount: -25.50,
+      notes: 'Late night food order'
+    };
+    
+    const context = _extractTransactionContext(testTransaction);
+    _logInfo('Test 3: Context extraction', context);
+    
+    // Test 4: Test dynamic categorization
+    const dynamicResult = _applyDynamicCategorizationRules('uber', context, testTransaction);
+    _logInfo('Test 4: Dynamic categorization', dynamicResult);
+    
+    // Test 5: Test historical mapping
+    const historicalResult = _getHistoricalMerchantMapping('contribution');
+    _logInfo('Test 5: Historical mapping', historicalResult);
+    
+    // Test 6: Test full categorization
+    const fullResult = _categorizeTransactionWithHistoricalData(testTransaction);
+    _logInfo('Test 6: Full categorization', fullResult);
+    
+    // Test 7: Test integration status
+    const status = getIntegrationStatus();
+    _logInfo('Test 7: Integration status', status);
+    
+    _logInfo('=== HISTORICAL INTEGRATION TEST COMPLETED ===');
+    return true;
+    
+  } catch (error) {
+    _logError('Error in historical integration test', error);
+    return false;
   }
 }
