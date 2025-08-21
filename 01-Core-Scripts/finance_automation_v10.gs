@@ -41,7 +41,8 @@ const SHEET_NAMES = {
   CSV_IMPORT: 'CSV_Import',
   AUDIT_LOG: 'AuditLog',
   AI_LEARNING: 'Learning_Hub',      // Learning system
-  FAILED_PARSING: 'Failed_Parsing'     // Consolidated parsing failures
+  FAILED_PARSING: 'Failed_Parsing',     // Consolidated parsing failures
+  DIAGNOSTIC_HUB: 'Diagnostic_Hub'      // Unified diagnostic center
 };
 
 // Column mappings (based on live data structure)
@@ -1091,6 +1092,59 @@ const ENHANCED_MERCHANT_PATTERNS = {
 
 // ===================== UTILITY FUNCTIONS =====================
 
+/**
+ * Get or create a sheet by name
+ * @param {string} sheetName - Name of the sheet
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet} - The sheet object
+ */
+function _getOrCreateSheet(sheetName) {
+  try {
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    let sheet = spreadsheet.getSheetByName(sheetName);
+    
+    if (!sheet) {
+      console.log(`Creating new sheet: ${sheetName}`);
+      sheet = spreadsheet.insertSheet(sheetName);
+      
+      // Set up headers based on sheet type
+      switch (sheetName) {
+        case SHEET_NAMES.MAIN:
+          sheet.getRange(1, 1, 1, 10).setValues([['Date', 'Amount', 'From', 'To', 'Bank', 'Notes', 'EmailId', 'Category', 'Type', 'Fingerprint']]);
+          break;
+        case SHEET_NAMES.ACCOUNTS:
+          sheet.getRange(1, 1, 1, 4).setValues([['Account', 'Balance', 'Last Updated', 'Type']]);
+          break;
+        case SHEET_NAMES.HOLDINGS:
+          sheet.getRange(1, 1, 1, 6).setValues([['Account', 'Ticker', 'Shares', 'Unit Price (CAD)', 'Total Value (CAD)', 'Last Updated']]);
+          break;
+        case SHEET_NAMES.STAGING:
+          sheet.getRange(1, 1, 1, 10).setValues([['Date', 'Amount', 'From', 'To', 'Bank', 'EmailId', 'StagedAt', 'Direction', 'Status', 'Fingerprint']]);
+          break;
+        case SHEET_NAMES.AUDIT_LOG:
+          sheet.getRange(1, 1, 1, 5).setValues([['Timestamp', 'Level', 'Message', 'Context', 'User']]);
+          break;
+        case SHEET_NAMES.AI_LEARNING:
+          sheet.getRange(1, 1, 1, 10).setValues([['Timestamp', 'LearningType', 'Pattern', 'Context', 'Confidence', 'SuccessCount', 'FailureCount', 'Metadata', 'Status', 'CrossValidated']]);
+          break;
+        case SHEET_NAMES.FAILED_PARSING:
+          sheet.getRange(1, 1, 1, 10).setValues([['Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 'FailureReason', 'AttemptedParsers', 'AIAnalysis', 'Status', 'Priority']]);
+          break;
+        case SHEET_NAMES.CSV_IMPORT:
+          sheet.getRange(1, 1, 1, 5).setValues([['Date', 'Description', 'Amount', 'Source', 'Processed']]);
+          break;
+        default:
+          sheet.getRange(1, 1, 1, 2).setValues([['Data', 'Value']]);
+      }
+    }
+    
+    return sheet;
+  } catch (error) {
+    console.error(`Failed to get/create sheet ${sheetName}:`, error);
+    logToAuditWithDetails('ERROR', `Failed to get/create sheet ${sheetName}`, {error: error.toString()});
+    throw error;
+  }
+}
+
 function _lc(s) {
   return (s || '').toString().trim().toLowerCase();
 }
@@ -1172,7 +1226,69 @@ function _logError(message, error, context = {}) {
   const timestamp = new Date().toISOString();
   console.error(`[ERROR] ${timestamp}: ${message}`, error);
   Logger.log(`ERROR: ${message} - ${error?.message || error} - ${JSON.stringify(context)}`);
-  _auditLog('ERROR', message, { error: error?.message || error, ...context });
+  
+  // Enhanced error logging with pattern detection
+  _auditLog('ERROR', message, { 
+    error: error?.message || error, 
+    stack: error?.stack,
+    errorType: _classifyError(error),
+    ...context 
+  });
+  
+  // Log to Failed_Parsing sheet if it's a parsing error
+  if (_isParsingError(message, error)) {
+    _logFailedParsing(message, error, context);
+  }
+}
+
+function _classifyError(error) {
+  if (!error) return 'UNKNOWN';
+  
+  const errorString = String(error.message || error).toLowerCase();
+  
+  if (errorString.includes('not defined')) return 'UNDEFINED_VARIABLE';
+  if (errorString.includes('permission') || errorString.includes('access')) return 'PERMISSION_ERROR';
+  if (errorString.includes('network') || errorString.includes('timeout')) return 'NETWORK_ERROR';
+  if (errorString.includes('parse') || errorString.includes('format')) return 'PARSING_ERROR';
+  if (errorString.includes('quota') || errorString.includes('limit')) return 'QUOTA_ERROR';
+  
+  return 'APPLICATION_ERROR';
+}
+
+function _isParsingError(message, error) {
+  const indicators = ['parse', 'email', 'transaction', 'format', 'extract'];
+  const messageCheck = message.toLowerCase();
+  const errorCheck = String(error?.message || error).toLowerCase();
+  
+  return indicators.some(indicator => 
+    messageCheck.includes(indicator) || errorCheck.includes(indicator)
+  );
+}
+
+function _logFailedParsing(message, error, context = {}) {
+  try {
+    const ss = _ss();
+    const failedSheet = _getOrCreateSheet(SHEET_NAMES.FAILED_PARSING, [
+      'Timestamp', 'Error Type', 'Message', 'Error Details', 'Email Subject', 
+      'Sender', 'Context', 'Resolution Status'
+    ]);
+    
+    const timestamp = new Date();
+    const errorType = _classifyError(error);
+    const safeMessage = String(message || 'Unknown error').trim();
+    const errorDetails = String(error?.message || error || 'No details').trim();
+    const emailSubject = context.subject || context.emailSubject || '';
+    const sender = context.sender || context.from || '';
+    const safeContext = JSON.stringify(context || {});
+    
+    failedSheet.appendRow([
+      timestamp, errorType, safeMessage, errorDetails, 
+      emailSubject, sender, safeContext, 'PENDING'
+    ]);
+    
+  } catch (logError) {
+    console.error('Failed to log parsing error:', logError);
+  }
 }
 
 function _logWarning(message, context = {}) {
@@ -1217,6 +1333,700 @@ function _safeExecute(func, context, retries = CONFIG.MAX_PROCESSING_ATTEMPTS) {
       }
       Utilities.sleep(1000 * attempt); // Exponential backoff
     }
+  }
+}
+
+function generateErrorAnalysisReport() {
+  try {
+    _logInfo('Generating comprehensive error analysis report...');
+    
+    const ss = _ss();
+    const auditSheet = ss.getSheetByName(SHEET_NAMES.AUDIT_LOG);
+    const failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_PARSING);
+    
+    if (!auditSheet && !failedSheet) {
+      _logWarning('No error logs found for analysis');
+      return;
+    }
+    
+    // Create or update Error Analysis sheet
+    const analysisSheet = _getOrCreateSheet('Error_Analysis', [
+      'Error Type', 'Count', 'Latest Occurrence', 'Sample Message', 'Recommended Action'
+    ]);
+    
+    // Clear existing data except headers
+    if (analysisSheet.getLastRow() > 1) {
+      analysisSheet.getRange(2, 1, analysisSheet.getLastRow() - 1, 5).clearContent();
+    }
+    
+    const errorPatterns = {};
+    
+    // Analyze audit log errors
+    if (auditSheet && auditSheet.getLastRow() > 1) {
+      const auditData = auditSheet.getRange(2, 1, auditSheet.getLastRow() - 1, 5).getValues();
+      
+      auditData.forEach(row => {
+        const [timestamp, level, message, context] = row;
+        if (level === 'ERROR') {
+          const errorType = _classifyErrorFromMessage(message, context);
+          if (!errorPatterns[errorType]) {
+            errorPatterns[errorType] = {
+              count: 0,
+              latestOccurrence: timestamp,
+              sampleMessage: message,
+              recommendedAction: _getRecommendedAction(errorType)
+            };
+          }
+          errorPatterns[errorType].count++;
+          if (new Date(timestamp) > new Date(errorPatterns[errorType].latestOccurrence)) {
+            errorPatterns[errorType].latestOccurrence = timestamp;
+            errorPatterns[errorType].sampleMessage = message;
+          }
+        }
+      });
+    }
+    
+    // Analyze failed parsing errors
+    if (failedSheet && failedSheet.getLastRow() > 1) {
+      const failedData = failedSheet.getRange(2, 1, failedSheet.getLastRow() - 1, 8).getValues();
+      
+      failedData.forEach(row => {
+        const [timestamp, errorType, message] = row;
+        const key = `PARSING_${errorType}`;
+        
+        if (!errorPatterns[key]) {
+          errorPatterns[key] = {
+            count: 0,
+            latestOccurrence: timestamp,
+            sampleMessage: message,
+            recommendedAction: _getRecommendedAction(key)
+          };
+        }
+        errorPatterns[key].count++;
+        if (new Date(timestamp) > new Date(errorPatterns[key].latestOccurrence)) {
+          errorPatterns[key].latestOccurrence = timestamp;
+          errorPatterns[key].sampleMessage = message;
+        }
+      });
+    }
+    
+    // Write analysis results
+    const sortedErrors = Object.entries(errorPatterns)
+      .sort(([,a], [,b]) => b.count - a.count);
+    
+    sortedErrors.forEach(([errorType, data]) => {
+      analysisSheet.appendRow([
+        errorType,
+        data.count,
+        data.latestOccurrence,
+        data.sampleMessage,
+        data.recommendedAction
+      ]);
+    });
+    
+    // Format the analysis sheet
+    const headerRange = analysisSheet.getRange(1, 1, 1, 5);
+    headerRange.setFontWeight('bold');
+    headerRange.setBackground('#4285f4');
+    headerRange.setFontColor('white');
+    
+    if (sortedErrors.length > 0) {
+      analysisSheet.autoResizeColumns(1, 5);
+    }
+    
+    _logInfo(`Error analysis complete. Found ${sortedErrors.length} error patterns.`);
+    
+    return {
+      totalPatterns: sortedErrors.length,
+      topErrors: sortedErrors.slice(0, 5).map(([type, data]) => ({
+        type,
+        count: data.count,
+        latest: data.latestOccurrence
+      }))
+    };
+    
+  } catch (error) {
+    _logError('Failed to generate error analysis report', error);
+    throw error;
+  }
+}
+
+function _classifyErrorFromMessage(message, context) {
+  const messageString = String(message || '').toLowerCase();
+  const contextString = String(context || '').toLowerCase();
+  const combined = `${messageString} ${contextString}`;
+  
+  if (combined.includes('not defined')) return 'UNDEFINED_VARIABLE';
+  if (combined.includes('permission') || combined.includes('access')) return 'PERMISSION_ERROR';
+  if (combined.includes('quota') || combined.includes('limit')) return 'QUOTA_ERROR';
+  if (combined.includes('network') || combined.includes('timeout')) return 'NETWORK_ERROR';
+  if (combined.includes('parse') || combined.includes('email')) return 'PARSING_ERROR';
+  if (combined.includes('sheet') || combined.includes('range')) return 'SPREADSHEET_ERROR';
+  
+  return 'GENERAL_ERROR';
+}
+
+function _getRecommendedAction(errorType) {
+  const actions = {
+    'UNDEFINED_VARIABLE': 'Check variable definitions and scoping. Ensure all required functions are implemented.',
+    'PERMISSION_ERROR': 'Verify script permissions and user access rights. Re-authorize if necessary.',
+    'QUOTA_ERROR': 'Reduce API calls or implement rate limiting. Consider upgrading quota limits.',
+    'NETWORK_ERROR': 'Implement retry logic with exponential backoff. Check network connectivity.',
+    'PARSING_ERROR': 'Review email parsing logic. Update patterns for new email formats.',
+    'SPREADSHEET_ERROR': 'Verify sheet names and ranges. Ensure sheets exist before accessing.',
+    'PARSING_UNDEFINED_VARIABLE': 'Fix undefined variables in email parsing functions.',
+    'PARSING_APPLICATION_ERROR': 'Debug parsing logic and add error handling.'
+  };
+  
+  return actions[errorType] || 'Review error details and implement appropriate error handling.';
+}
+
+// ===================== UNIFIED DIAGNOSTIC SYSTEM =====================
+
+function _logUnifiedDiagnostic(type, data) {
+  try {
+    const ss = _ss();
+    const diagnosticSheet = _getOrCreateSheet(SHEET_NAMES.DIAGNOSTIC_HUB, [
+      'Timestamp', 'DiagnosticType', 'Severity', 'Component', 'Message', 
+      'Context', 'Patterns', 'Confidence', 'Resolution', 'CrossReference'
+    ]);
+    
+    const timestamp = new Date();
+    const severity = _calculateSeverity(type, data);
+    const component = _extractComponent(data);
+    const patterns = _extractPatterns(data);
+    const crossRef = _generateCrossReference(type, data);
+    
+    diagnosticSheet.appendRow([
+      timestamp,
+      type,
+      severity,
+      component,
+      data.message || '',
+      JSON.stringify(data.context || {}),
+      JSON.stringify(patterns || {}),
+      data.confidence || 0,
+      data.resolution || 'PENDING',
+      crossRef
+    ]);
+    
+    // Also log to appropriate legacy sheets for backward compatibility
+    _logToLegacySheets(type, data);
+    
+  } catch (error) {
+    console.error('Failed to log unified diagnostic:', error);
+  }
+}
+
+function consolidateDiagnosticData() {
+  try {
+    _logInfo('Starting unified diagnostic consolidation...');
+    
+    const ss = _ss();
+    const auditSheet = ss.getSheetByName(SHEET_NAMES.AUDIT_LOG);
+    const failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_PARSING);
+    const learningSheet = ss.getSheetByName(SHEET_NAMES.AI_LEARNING);
+    
+    // Create consolidated analysis
+    const consolidatedAnalysis = {
+      errorPatterns: {},
+      learningPatterns: {},
+      systemHealth: {},
+      recommendations: []
+    };
+    
+    // Process AuditLog data
+    if (auditSheet && auditSheet.getLastRow() > 1) {
+      const auditData = auditSheet.getRange(2, 1, auditSheet.getLastRow() - 1, 5).getValues();
+      _processAuditData(auditData, consolidatedAnalysis);
+    }
+    
+    // Process Failed Parsing data
+    if (failedSheet && failedSheet.getLastRow() > 1) {
+      const failedData = failedSheet.getRange(2, 1, failedSheet.getLastRow() - 1, 10).getValues();
+      _processFailedParsingData(failedData, consolidatedAnalysis);
+    }
+    
+    // Process Learning Hub data
+    if (learningSheet && learningSheet.getLastRow() > 1) {
+      const learningData = learningSheet.getRange(2, 1, learningSheet.getLastRow() - 1, 10).getValues();
+      _processLearningData(learningData, consolidatedAnalysis);
+    }
+    
+    // Generate unified insights
+    const insights = _generateUnifiedInsights(consolidatedAnalysis);
+    
+    // Create Excel Analyzer compatible output
+    _createExcelAnalyzerOutput(insights);
+    
+    _logInfo('Diagnostic consolidation complete');
+    return insights;
+    
+  } catch (error) {
+    _logError('Failed to consolidate diagnostic data', error);
+    throw error;
+  }
+}
+
+function _processAuditData(auditData, analysis) {
+  auditData.forEach(row => {
+    const [timestamp, level, message, context, user] = row;
+    
+    if (level === 'ERROR') {
+      const errorType = _classifyErrorFromMessage(message, context);
+      
+      if (!analysis.errorPatterns[errorType]) {
+        analysis.errorPatterns[errorType] = {
+          count: 0,
+          frequency: 'LOW',
+          impact: 'MEDIUM',
+          firstSeen: timestamp,
+          lastSeen: timestamp,
+          samples: []
+        };
+      }
+      
+      analysis.errorPatterns[errorType].count++;
+      analysis.errorPatterns[errorType].lastSeen = timestamp;
+      
+      if (analysis.errorPatterns[errorType].samples.length < 3) {
+        analysis.errorPatterns[errorType].samples.push({
+          message: message,
+          context: context,
+          timestamp: timestamp
+        });
+      }
+      
+      // Determine frequency and impact
+      if (analysis.errorPatterns[errorType].count > 10) {
+        analysis.errorPatterns[errorType].frequency = 'HIGH';
+        analysis.errorPatterns[errorType].impact = 'HIGH';
+      } else if (analysis.errorPatterns[errorType].count > 5) {
+        analysis.errorPatterns[errorType].frequency = 'MEDIUM';
+      }
+    }
+  });
+}
+
+function _processFailedParsingData(failedData, analysis) {
+  failedData.forEach(row => {
+    const [timestamp, emailId, from, subject, bodyPreview, failureReason, 
+           attemptedParsers, aiAnalysis, status, priority] = row;
+    
+    const domain = _extractDomainFromEmail(from);
+    const parsingType = _classifyParsingFailure(failureReason, aiAnalysis);
+    
+    if (!analysis.errorPatterns[parsingType]) {
+      analysis.errorPatterns[parsingType] = {
+        count: 0,
+        domains: new Set(),
+        subjects: new Set(),
+        resolutionRate: 0
+      };
+    }
+    
+    analysis.errorPatterns[parsingType].count++;
+    if (domain) analysis.errorPatterns[parsingType].domains.add(domain);
+    if (subject) analysis.errorPatterns[parsingType].subjects.add(subject.substring(0, 50));
+    
+    // Track resolution rate
+    if (status === 'RESOLVED') {
+      analysis.errorPatterns[parsingType].resolutionRate++;
+    }
+  });
+}
+
+function _processLearningData(learningData, analysis) {
+  learningData.forEach(row => {
+    const [timestamp, learningType, pattern, context, confidence, 
+           successCount, failureCount, metadata, status, crossValidated] = row;
+    
+    if (!analysis.learningPatterns[learningType]) {
+      analysis.learningPatterns[learningType] = {
+        totalPatterns: 0,
+        averageConfidence: 0,
+        successRate: 0,
+        validatedPatterns: 0
+      };
+    }
+    
+    const lp = analysis.learningPatterns[learningType];
+    lp.totalPatterns++;
+    lp.averageConfidence = ((lp.averageConfidence * (lp.totalPatterns - 1)) + parseFloat(confidence || 0)) / lp.totalPatterns;
+    
+    const total = (successCount || 0) + (failureCount || 0);
+    if (total > 0) {
+      lp.successRate = ((lp.successRate * (lp.totalPatterns - 1)) + ((successCount || 0) / total)) / lp.totalPatterns;
+    }
+    
+    if (crossValidated === 'TRUE' || crossValidated === true) {
+      lp.validatedPatterns++;
+    }
+  });
+}
+
+function _generateUnifiedInsights(analysis) {
+  const insights = {
+    systemHealth: 'UNKNOWN',
+    criticalIssues: [],
+    opportunities: [],
+    recommendations: [],
+    excelAnalyzerData: {}
+  };
+  
+  // Calculate system health
+  const totalErrors = Object.values(analysis.errorPatterns).reduce((sum, pattern) => sum + pattern.count, 0);
+  const highImpactErrors = Object.values(analysis.errorPatterns).filter(pattern => pattern.impact === 'HIGH').length;
+  
+  if (highImpactErrors === 0 && totalErrors < 10) {
+    insights.systemHealth = 'HEALTHY';
+  } else if (highImpactErrors < 3 && totalErrors < 50) {
+    insights.systemHealth = 'STABLE';
+  } else if (highImpactErrors < 5 && totalErrors < 100) {
+    insights.systemHealth = 'DEGRADED';
+  } else {
+    insights.systemHealth = 'CRITICAL';
+  }
+  
+  // Identify critical issues
+  Object.entries(analysis.errorPatterns).forEach(([errorType, data]) => {
+    if (data.impact === 'HIGH' || data.frequency === 'HIGH') {
+      insights.criticalIssues.push({
+        type: errorType,
+        count: data.count,
+        impact: data.impact,
+        recommendation: _getRecommendedAction(errorType)
+      });
+    }
+  });
+  
+  // Generate Excel Analyzer compatible data
+  insights.excelAnalyzerData = {
+    errorSummary: analysis.errorPatterns,
+    learningEffectiveness: analysis.learningPatterns,
+    systemMetrics: {
+      totalErrors: totalErrors,
+      parsingSuccessRate: _calculateParsingSuccessRate(analysis),
+      learningAccuracy: _calculateLearningAccuracy(analysis)
+    }
+  };
+  
+  return insights;
+}
+
+function _createExcelAnalyzerOutput(insights) {
+  try {
+    const ss = _ss();
+    const outputSheet = _getOrCreateSheet('Excel_Analyzer_Output', [
+      'Metric', 'Value', 'Trend', 'Status', 'Recommendation', 'LastUpdated'
+    ]);
+    
+    // Clear existing data except headers
+    if (outputSheet.getLastRow() > 1) {
+      outputSheet.getRange(2, 1, outputSheet.getLastRow() - 1, 6).clearContent();
+    }
+    
+    const timestamp = new Date();
+    
+    // System health metrics
+    outputSheet.appendRow([
+      'System Health', 
+      insights.systemHealth, 
+      _getTrendIndicator(insights.systemHealth), 
+      insights.systemHealth === 'HEALTHY' ? 'GOOD' : 'NEEDS_ATTENTION',
+      'Monitor critical issues and implement recommended fixes',
+      timestamp
+    ]);
+    
+    // Error patterns
+    Object.entries(insights.excelAnalyzerData.errorSummary).forEach(([errorType, data]) => {
+      outputSheet.appendRow([
+        `Error: ${errorType}`,
+        data.count,
+        data.frequency,
+        data.impact,
+        _getRecommendedAction(errorType),
+        timestamp
+      ]);
+    });
+    
+    // Learning patterns
+    Object.entries(insights.excelAnalyzerData.learningEffectiveness).forEach(([learningType, data]) => {
+      outputSheet.appendRow([
+        `Learning: ${learningType}`,
+        `${Math.round(data.successRate * 100)}% success`,
+        data.averageConfidence > 0.8 ? 'IMPROVING' : 'STABLE',
+        data.validatedPatterns > 5 ? 'GOOD' : 'DEVELOPING',
+        'Continue pattern refinement and validation',
+        timestamp
+      ]);
+    });
+    
+    // Format the output sheet
+    const headerRange = outputSheet.getRange(1, 1, 1, 6);
+    headerRange.setFontWeight('bold');
+    headerRange.setBackground('#4285f4');
+    headerRange.setFontColor('white');
+    
+    outputSheet.autoResizeColumns(1, 6);
+    
+    _logInfo('Excel Analyzer output created successfully');
+    
+  } catch (error) {
+    _logError('Failed to create Excel Analyzer output', error);
+  }
+}
+
+function _calculateSeverity(type, data) {
+  const severityMap = {
+    'PARSING_ERROR': 'HIGH',
+    'UNDEFINED_VARIABLE': 'CRITICAL',
+    'PERMISSION_ERROR': 'HIGH',
+    'LEARNING_SUCCESS': 'LOW',
+    'AUDIT_WARNING': 'MEDIUM'
+  };
+  
+  return severityMap[type] || 'MEDIUM';
+}
+
+function _extractComponent(data) {
+  if (data.context && typeof data.context === 'string') {
+    if (data.context.includes('email')) return 'EMAIL_PARSER';
+    if (data.context.includes('transaction')) return 'TRANSACTION_PROCESSOR';
+    if (data.context.includes('categoriz')) return 'CATEGORIZATION';
+    if (data.context.includes('sheet')) return 'SPREADSHEET';
+  }
+  return 'UNKNOWN';
+}
+
+function _extractPatterns(data) {
+  const patterns = {};
+  
+  if (data.aiAnalysis && typeof data.aiAnalysis === 'string') {
+    try {
+      const analysis = JSON.parse(data.aiAnalysis);
+      patterns.detectedPatterns = analysis.patterns || [];
+    } catch (e) {
+      // Ignore JSON parse errors
+    }
+  }
+  
+  return patterns;
+}
+
+function _generateCrossReference(type, data) {
+  const refs = [];
+  
+  if (data.emailId) refs.push(`EMAIL:${data.emailId}`);
+  if (data.transactionId) refs.push(`TX:${data.transactionId}`);
+  if (data.category) refs.push(`CAT:${data.category}`);
+  
+  return refs.join('|');
+}
+
+function _logToLegacySheets(type, data) {
+  // Maintain backward compatibility by logging to original sheets
+  if (type.includes('PARSING')) {
+    _logFailedParsing(data.message, new Error(data.failureReason || 'Unknown'), data.context || {});
+  }
+  
+  if (type.includes('LEARNING')) {
+    // Log to Learning Hub if needed
+  }
+  
+  if (type.includes('ERROR') || type.includes('AUDIT')) {
+    _auditLog(data.level || 'ERROR', data.message, data.context || {});
+  }
+}
+
+function _getTrendIndicator(health) {
+  const trends = {
+    'HEALTHY': '↗️ IMPROVING',
+    'STABLE': '→ STABLE', 
+    'DEGRADED': '↘️ DECLINING',
+    'CRITICAL': '⬇️ CRITICAL'
+  };
+  return trends[health] || '? UNKNOWN';
+}
+
+function _extractDomainFromEmail(email) {
+  if (!email) return null;
+  const match = email.match(/@([^>]+)/);
+  return match ? match[1].trim() : null;
+}
+
+function _classifyParsingFailure(failureReason, aiAnalysis) {
+  const reason = String(failureReason || '').toLowerCase();
+  
+  if (reason.includes('domain is not defined')) return 'UNDEFINED_DOMAIN_ERROR';
+  if (reason.includes('not defined')) return 'UNDEFINED_VARIABLE_ERROR';
+  if (reason.includes('permission')) return 'PERMISSION_ERROR';
+  if (reason.includes('timeout')) return 'TIMEOUT_ERROR';
+  if (reason.includes('format')) return 'FORMAT_ERROR';
+  if (reason.includes('parse')) return 'PARSING_LOGIC_ERROR';
+  
+  return 'UNKNOWN_PARSING_ERROR';
+}
+
+function _calculateParsingSuccessRate(analysis) {
+  const parsingErrors = Object.values(analysis.errorPatterns)
+    .filter(pattern => pattern.type && pattern.type.includes('PARSING'))
+    .reduce((sum, pattern) => sum + pattern.count, 0);
+  
+  // Estimate based on error patterns (this could be enhanced with success tracking)
+  const estimatedTotal = parsingErrors * 10; // Assumption: 1 error per 10 attempts
+  return estimatedTotal > 0 ? Math.max(0, 1 - (parsingErrors / estimatedTotal)) : 0.95;
+}
+
+function _calculateLearningAccuracy(analysis) {
+  const learningPatterns = Object.values(analysis.learningPatterns);
+  if (learningPatterns.length === 0) return 0;
+  
+  const totalAccuracy = learningPatterns.reduce((sum, pattern) => sum + pattern.successRate, 0);
+  return totalAccuracy / learningPatterns.length;
+}
+
+// Enhanced Excel Analyzer Integration
+function runConsolidatedAnalysis() {
+  try {
+    _logInfo('Starting consolidated diagnostic analysis...');
+    
+    // Run the consolidation
+    const insights = consolidateDiagnosticData();
+    
+    // Generate comprehensive report
+    const report = {
+      timestamp: new Date(),
+      systemHealth: insights.systemHealth,
+      summary: {
+        totalErrors: Object.values(insights.excelAnalyzerData.errorSummary).reduce((sum, p) => sum + p.count, 0),
+        criticalIssues: insights.criticalIssues.length,
+        parsingSuccessRate: insights.excelAnalyzerData.systemMetrics.parsingSuccessRate,
+        learningAccuracy: insights.excelAnalyzerData.systemMetrics.learningAccuracy
+      },
+      topIssues: insights.criticalIssues.slice(0, 5),
+      recommendations: insights.recommendations
+    };
+    
+    _logInfo(`Analysis complete. System Health: ${report.systemHealth}`);
+    _logInfo(`Total Errors: ${report.summary.totalErrors}, Critical Issues: ${report.summary.criticalIssues}`);
+    
+    return report;
+    
+  } catch (error) {
+    _logError('Failed to run consolidated analysis', error);
+    throw error;
+  }
+}
+
+function generateExcelAnalyzerReport() {
+  try {
+    _logInfo('Generating Excel Analyzer compatible report...');
+    
+    const analysis = runConsolidatedAnalysis();
+    
+    // Create a formatted report that matches Excel Analyzer expectations
+    const excelReport = {
+      sheets: {
+        'Failed_Parsing': {
+          total_rows: Object.values(analysis.summary).reduce((sum, val) => typeof val === 'number' ? sum + val : sum, 0),
+          error_patterns: analysis.topIssues.map(issue => ({
+            type: issue.type,
+            count: issue.count,
+            severity: issue.impact,
+            recommendation: issue.recommendation
+          }))
+        },
+        'AuditLog': {
+          error_frequency: analysis.summary.totalErrors > 100 ? 'HIGH' : analysis.summary.totalErrors > 50 ? 'MEDIUM' : 'LOW',
+          system_stability: analysis.systemHealth
+        },
+        'Learning_Hub': {
+          learning_effectiveness: Math.round(analysis.summary.learningAccuracy * 100) + '%',
+          pattern_confidence: analysis.summary.parsingSuccessRate > 0.8 ? 'HIGH' : 'MEDIUM'
+        }
+      },
+      consolidated_insights: {
+        primary_concern: analysis.criticalIssues[0]?.type || 'SYSTEM_STABLE',
+        resolution_priority: analysis.criticalIssues.map(issue => issue.type),
+        next_actions: analysis.recommendations.slice(0, 3)
+      }
+    };
+    
+    console.log('=== EXCEL ANALYZER CONSOLIDATED REPORT ===');
+    console.log(JSON.stringify(excelReport, null, 2));
+    
+    return excelReport;
+    
+  } catch (error) {
+    _logError('Failed to generate Excel Analyzer report', error);
+    throw error;
+  }
+}
+
+// ===================== UNIFIED DIAGNOSTIC DEMO =====================
+
+function demonstrateUnifiedDiagnostics() {
+  try {
+    _logInfo('=== UNIFIED DIAGNOSTIC SYSTEM DEMONSTRATION ===');
+    
+    // 1. Log some sample unified diagnostics
+    _logUnifiedDiagnostic('PARSING_ERROR', {
+      message: 'Failed to parse PayPal email',
+      context: { 
+        emailId: 'test123', 
+        sender: 'service@paypal.com',
+        error: 'domain is not defined' 
+      },
+      confidence: 0.9,
+      resolution: 'PENDING'
+    });
+    
+    _logUnifiedDiagnostic('LEARNING_SUCCESS', {
+      message: 'Successfully learned new merchant pattern',
+      context: { 
+        merchant: 'GitHub Inc',
+        category: 'Technology',
+        confidence: 0.85
+      },
+      confidence: 0.85,
+      resolution: 'RESOLVED'
+    });
+    
+    // 2. Run consolidated analysis
+    const analysis = runConsolidatedAnalysis();
+    
+    // 3. Generate Excel Analyzer report
+    const excelReport = generateExcelAnalyzerReport();
+    
+    // 4. Create summary for user
+    const summary = {
+      consolidation_success: true,
+      unified_sheets_created: [SHEET_NAMES.DIAGNOSTIC_HUB, 'Excel_Analyzer_Output'],
+      system_health: analysis.systemHealth,
+      key_benefits: [
+        'Unified error tracking across all components',
+        'Integrated learning pattern analysis', 
+        'Excel Analyzer compatible output',
+        'Streamlined diagnostic workflow',
+        'Cross-referenced error patterns'
+      ],
+      next_steps: [
+        'Run consolidateDiagnosticData() to merge existing data',
+        'Use generateExcelAnalyzerReport() for reports',
+        'Monitor Diagnostic_Hub sheet for unified insights'
+      ]
+    };
+    
+    _logInfo('Unified diagnostic system demonstration complete');
+    console.log('\n=== UNIFIED DIAGNOSTIC SYSTEM SUMMARY ===');
+    console.log(JSON.stringify(summary, null, 2));
+    
+    return summary;
+    
+  } catch (error) {
+    _logError('Failed to demonstrate unified diagnostics', error);
+    throw error;
   }
 }
 
@@ -1765,8 +2575,9 @@ function _identifyEmailSender(from, subject, body) {
   
   // Primary domain-based detection
   for (const [senderId, profile] of Object.entries(SENDER_PROFILES)) {
-    if (profile.domains.some(domain => fromLower.includes(domain))) {
-      _logInfo(`Domain match found: ${senderId}`, { domain: domain, confidence: 'high' });
+    const matchedDomain = profile.domains.find(domain => fromLower.includes(domain));
+    if (matchedDomain) {
+      _logInfo(`Domain match found: ${senderId}`, { domain: matchedDomain, confidence: 'high' });
       return { id: senderId, profile: profile, confidence: 'high' };
     }
   }
@@ -4289,6 +5100,13 @@ function _categorizeTransaction(transaction) {
       return learnedCategory;
     }
     
+    // Enhanced fuzzy matching with contextual rules
+    const fuzzyResult = _performFuzzyMatching(transaction, searchText);
+    if (fuzzyResult.category && fuzzyResult.confidence >= 0.7) {
+      _logInfo(`Fuzzy matched as ${fuzzyResult.category} (confidence: ${fuzzyResult.confidence}, method: ${fuzzyResult.method})`);
+      return fuzzyResult.category;
+    }
+    
     // Enhanced merchant pattern matching with confidence scoring
     let bestMatch = null;
     let bestConfidence = 0;
@@ -4350,6 +5168,112 @@ function _categorizeTransaction(transaction) {
   }
 }
 
+function _performFuzzyMatching(transaction, searchText) {
+  try {
+    const merchant = _extractCleanMerchantName(transaction.toAccount);
+    const amount = Math.abs(parseFloat(transaction.amount || 0));
+    const time = transaction.date ? new Date(transaction.date).getHours() : null;
+    
+    // Contextual Uber categorization
+    if (merchant.includes('uber')) {
+      if (time !== null && (time >= 11 && time <= 14) || (time >= 18 && time <= 22)) {
+        return { category: 'Food & Dining', confidence: 0.9, method: 'contextual_time' };
+      }
+      return { category: 'Transportation', confidence: 0.8, method: 'contextual_default' };
+    }
+    
+    // Location-specific Aventura patterns
+    if (searchText.includes('aventura')) {
+      if (searchText.includes('mall') || amount > 50) {
+        return { category: 'Shopping', confidence: 0.85, method: 'contextual_location' };
+      }
+      if (amount < 20) {
+        return { category: 'Food & Dining', confidence: 0.8, method: 'contextual_amount' };
+      }
+    }
+    
+    // Enhanced keyword matching with fuzzy similarity
+    const keywords = {
+      'Food & Dining': ['restaurant', 'cafe', 'pizza', 'coffee', 'food', 'dining', 'kitchen', 'grill'],
+      'Transportation': ['gas', 'fuel', 'transit', 'parking', 'taxi', 'bus', 'train'],
+      'Shopping': ['store', 'shop', 'market', 'retail', 'purchase', 'buy'],
+      'Healthcare': ['medical', 'pharmacy', 'doctor', 'clinic', 'hospital', 'health'],
+      'Entertainment': ['movie', 'cinema', 'game', 'theater', 'music', 'concert', 'show']
+    };
+    
+    let bestMatch = { category: null, confidence: 0, method: 'fuzzy' };
+    
+    for (const [category, categoryKeywords] of Object.entries(keywords)) {
+      for (const keyword of categoryKeywords) {
+        const similarity = _calculateFuzzySimilarity(merchant, keyword);
+        if (similarity > 0.7 && similarity > bestMatch.confidence) {
+          bestMatch = { category, confidence: similarity, method: 'fuzzy_keyword' };
+        }
+        
+        // Direct keyword match in searchText
+        if (searchText.includes(keyword)) {
+          const confidence = 0.8;
+          if (confidence > bestMatch.confidence) {
+            bestMatch = { category, confidence, method: 'direct_keyword' };
+          }
+        }
+      }
+    }
+    
+    return bestMatch;
+    
+  } catch (error) {
+    _logError('Failed to perform fuzzy matching', error);
+    return { category: null, confidence: 0, method: 'error' };
+  }
+}
+
+function _calculateFuzzySimilarity(str1, str2) {
+  try {
+    if (!str1 || !str2) return 0;
+    
+    const s1 = str1.toLowerCase();
+    const s2 = str2.toLowerCase();
+    
+    // Exact match
+    if (s1 === s2) return 1.0;
+    
+    // Contains match
+    if (s1.includes(s2) || s2.includes(s1)) return 0.8;
+    
+    // Levenshtein distance-based similarity
+    const distance = _levenshteinDistance(s1, s2);
+    const maxLength = Math.max(s1.length, s2.length);
+    
+    if (maxLength === 0) return 1.0;
+    
+    return 1 - (distance / maxLength);
+    
+  } catch (error) {
+    return 0;
+  }
+}
+
+function _levenshteinDistance(str1, str2) {
+  const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
+  
+  for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+  for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+  
+  for (let j = 1; j <= str2.length; j++) {
+    for (let i = 1; i <= str1.length; i++) {
+      const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1,     // deletion
+        matrix[j - 1][i] + 1,     // insertion
+        matrix[j - 1][i - 1] + indicator // substitution
+      );
+    }
+  }
+  
+  return matrix[str2.length][str1.length];
+}
+
 function _getLearnedCategory(transaction) {
   try {
     const ss = _ss();
@@ -4390,15 +5314,29 @@ function _extractCleanMerchantName(toAccount) {
   
   let merchant = toAccount.toLowerCase()
     .replace(/[0-9]{4,}/g, '') // Remove long numbers (card numbers, transaction IDs)
-    .replace(/\b(card|aventura|payment|purchase|pos|debit|credit|transaction|interac)\b/gi, '') // Remove banking terms
+    .replace(/\b(card|payment|purchase|pos|debit|credit|transaction|interac)\b/gi, '') // Remove banking terms
     .replace(/[^a-zA-Z\s]/g, ' ') // Replace non-letters with spaces
     .replace(/\s+/g, ' ') // Normalize spaces
     .trim();
   
-  // Remove stop words
+  // Special handling for Aventura - preserve location context
+  if (merchant.includes('aventura')) {
+    // Keep aventura as part of merchant name for location-based categorization
+    merchant = merchant.replace(/\baventura\b/gi, 'aventura');
+  }
+  
+  // Remove stop words but preserve important location markers
   const words = merchant.split(' ').filter(word => {
-    return word.length > 2 && !CATEGORY_STOPWORDS.has(word.toLowerCase());
+    const lowerWord = word.toLowerCase();
+    return word.length > 2 && 
+           !CATEGORY_STOPWORDS.has(lowerWord) && 
+           lowerWord !== 'aventura'; // Keep aventura for context
   });
+  
+  // Add aventura back if it was in the original
+  if (merchant.includes('aventura') && !words.includes('aventura')) {
+    words.push('aventura');
+  }
   
   return words.join(' ').trim();
 }
