@@ -2368,6 +2368,8 @@ function _testEnhancedPairingLogic() {
     };
   }
 }
+
+function runConsolidatedAnalysis() {
   try {
     _logInfo('Starting consolidated diagnostic analysis...');
     
