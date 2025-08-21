@@ -112,7 +112,20 @@ const MY_ACCOUNTS = [
   'CIBC Aventura', 
   'CIBC Dividend',
   'Wealthsimple RRSP',
-  'Wealthsimple Cash'
+  'Wealthsimple Cash',
+  'PayPal'
+];
+
+// Supported banks and financial institutions
+const SUPPORTED_BANKS = [
+  'CIBC',
+  'PC Financial',
+  'PayPal',
+  'Wealthsimple',
+  'Tangerine',
+  'BMO',
+  'RBC',
+  'Scotia'
 ];
 
 // Account normalization (to fix naming inconsistencies)
@@ -124,6 +137,8 @@ const ACCOUNT_ALIASES = {
   'dividend': 'CIBC Dividend',
   'rrsp': 'Wealthsimple RRSP',
   'wealthsimple': 'Wealthsimple Cash',
+  'paypal': 'PayPal',
+  'pay pal': 'PayPal',
   'cash': '', // CRITICAL: Prevents "Cash" phantom accounts
   'retirey mcretireface': 'Wealthsimple RRSP' // From your data
 };
@@ -4665,10 +4680,14 @@ function _updateNetWorth() {
     dashboardSheet.getRange(newRow, 1).setNumberFormat('mm/dd/yyyy');
     dashboardSheet.getRange(newRow, 2, 1, 4).setNumberFormat('$#,##0.00');
     
+    // Create or update net worth chart
+    _createNetWorthChart(dashboardSheet, netWorthStartRow);
+    
     _logInfo(`Net worth updated in dashboard: $${netWorth.toFixed(2)}`, {
       cash: totalCash.toFixed(2),
       investments: totalInvestments.toFixed(2),
-      liabilities: totalLiabilities.toFixed(2)
+      liabilities: totalLiabilities.toFixed(2),
+      chartLocation: `Dashboard row ${netWorthStartRow}`
     });
     
     try {
@@ -4709,6 +4728,59 @@ function _findOrCreateDashboardSection(dashboardSheet, sectionTitle) {
   dashboardSheet.getRange(sectionStartRow, 1).setFontWeight('bold').setFontSize(12).setBackground('#d9ead3');
   
   return sectionStartRow + 1; // Return row after the section header
+}
+
+function _createNetWorthChart(dashboardSheet, dataStartRow) {
+  try {
+    // Check if we have enough data for a chart (at least 2 data points)
+    const dataRange = dashboardSheet.getRange(dataStartRow, 1, dashboardSheet.getLastRow() - dataStartRow + 1, 5);
+    const data = dataRange.getValues();
+    
+    if (data.length < 2) {
+      _logInfo('Not enough data points for chart (need at least 2)');
+      return;
+    }
+    
+    // Remove existing charts in this area to avoid duplicates
+    const charts = dashboardSheet.getCharts();
+    for (const chart of charts) {
+      const position = chart.getContainerInfo();
+      if (position && position.getAnchorRow() >= dataStartRow - 5 && 
+          position.getAnchorRow() <= dataStartRow + 20) {
+        dashboardSheet.removeChart(chart);
+      }
+    }
+    
+    // Create the chart range (Date and Net Worth columns)
+    const chartDataRange = dashboardSheet.getRange(dataStartRow, 1, data.length, 5);
+    
+    // Create line chart
+    const chart = dashboardSheet.newChart()
+      .setChartType(Charts.ChartType.LINE)
+      .addRange(chartDataRange)
+      .setPosition(dataStartRow - 2, 8, 0, 0) // Position to the right of the data
+      .setOption('title', 'Net Worth History')
+      .setOption('width', 600)
+      .setOption('height', 400)
+      .setOption('hAxis.title', 'Date')
+      .setOption('vAxis.title', 'Amount ($CAD)')
+      .setOption('vAxis.format', '$#,##0')
+      .setOption('legend.position', 'bottom')
+      .setOption('curveType', 'function')
+      .setOption('lineWidth', 3)
+      .setOption('colors', ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']) // Blue, Orange, Green, Red
+      .build();
+    
+    dashboardSheet.insertChart(chart);
+    
+    _logInfo('Net worth chart created successfully', {
+      dataPoints: data.length,
+      chartPosition: 'Column H, starting row ' + (dataStartRow - 2)
+    });
+    
+  } catch (error) {
+    _logError('Failed to create net worth chart', error);
+  }
 }
 
 function _containsGenericBankingTerms(text) {
@@ -5044,32 +5116,50 @@ function _writeDashboardSummary(dashboardSheet, summary) {
 
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  const menu = ui.createMenu('Finance Automation');
+  const menu = ui.createMenu('💰 Finance Automation');
 
+  // Main Actions
   menu.addItem('🚀 Run Full Automation', 'runFullAutomation');
+  menu.addItem('⚡ Quick Setup', 'quickSetup');
   menu.addSeparator();
 
-  const manualUpdatesMenu = ui.createMenu('Manual Updates')
+  // Manual Updates
+  const manualUpdatesMenu = ui.createMenu('📊 Manual Updates')
     .addItem('🔄 Refresh Holdings', 'refreshHoldings')
-    .addItem('📊 Update Dashboard', 'updateDashboard')
-    .addItem('📈 Update Net Worth', 'updateNetWorth');
+    .addItem('📈 Update Net Worth', 'updateNetWorth')
+    .addItem('� Update Dashboard', 'updateDashboard')
+    .addItem('� Initialize Holdings Data', 'initializeHoldingsData');
   menu.addSubMenu(manualUpdatesMenu);
 
-  const transactionToolsMenu = ui.createMenu('Transaction Tools')
+  // Transaction Management
+  const transactionToolsMenu = ui.createMenu('💳 Transaction Tools')
     .addItem('📧 Process New Emails', 'processNewEmails')
     .addItem('🤝 Pair Staged Transfers', 'pairStagedTransfers')
     .addItem('🧹 Cleanup Stale Transactions', 'cleanupStaleTransactions')
     .addItem('🔍 Review Pending', 'reviewPendingTransactions')
-    .addItem('📚 Learn Categories', 'learnCategoriesFromTransactions');
+    .addItem('📚 Learn Categories', 'learnCategoriesFromTransactions')
+    .addItem('📑 Sort All Transactions', 'sortAllTransactions')
+    .addItem('📊 Transaction Order Stats', 'getTransactionOrderStats');
   menu.addSubMenu(transactionToolsMenu);
-  
-  menu.addSeparator();
 
-  const debugMenu = ui.createMenu('Debug & Testing')
+  // Import Tools
+  const importMenu = ui.createMenu('📁 Import & Processing')
+    .addItem('📄 Test Import System', 'testImportSystem')
+    .addSeparator()
+    .addItem('ℹ️  CSV Import Info', 'showCSVImportInfo')
+    .addItem('ℹ️  PDF Import Info', 'showPDFImportInfo');
+  menu.addSubMenu(importMenu);
+  
+  // Testing & Debugging
+  const debugMenu = ui.createMenu('🧪 Debug & Testing')
     .addItem('📋 Show Configuration', 'showConfiguration')
     .addItem('🧪 Test Email Parsing', 'testEmailParsing')
+    .addItem('💰 Test PayPal Processing', 'testPayPalProcessing')
+    .addItem('🧠 Test Historical Categorization', 'testHistoricalCategorization')
+    .addItem('🔗 Test Historical Integration', 'testHistoricalIntegration')
     .addSeparator()
     .addItem('🔍 Diagnostic Category Analysis', 'diagnosticCategoryLearning')
+    .addItem('💳 Debug PayPal Emails', 'debugPayPalEmails')
     .addItem('🚀 Force Learn Categories (Low Threshold)', 'forceLearnCategoriesLowThreshold');
   menu.addSubMenu(debugMenu);
 
@@ -5088,6 +5178,62 @@ function updateNetWorth() {
 
 function learnCategoriesFromTransactions() {
   _learnCategoriesFromTransactions();
+}
+
+function diagnosticCategoryLearning() {
+  _diagnosticCategoryLearning();
+}
+
+function generateDashboard() {
+  _updateDashboard();
+}
+
+function showCSVImportInfo() {
+  const ui = SpreadsheetApp.getUi();
+  const info = `CSV Import Information:
+
+📊 How to Import CSV Files:
+1. Use the processCSVStatement(csvData, accountName) function
+2. Supported formats: CIBC, PC Financial, Generic
+3. The system auto-detects the format
+
+💡 Example Usage:
+• processCSVStatement(csvData, "PC Financial")
+• processCSVStatement(csvData, "CIBC Aventura")
+
+🔧 Features:
+• Auto-detects date formats
+• Handles multiple currencies
+• Removes duplicate transactions
+• Validates transaction data
+
+📞 For manual processing, prepare your CSV data and call the function programmatically.`;
+
+  ui.alert('CSV Import Information', info, ui.ButtonSet.OK);
+}
+
+function showPDFImportInfo() {
+  const ui = SpreadsheetApp.getUi();
+  const info = `PDF Import Information:
+
+📋 How to Import PDF Files:
+1. Use the processPDFStatement(pdfBlob, accountName) function
+2. Supported formats: CIBC, PC Financial, Generic bank statements
+3. The system extracts text and parses transactions
+
+💡 Example Usage:
+• processPDFStatement(pdfBlob, "PC Financial")
+• processPDFStatement(pdfBlob, "CIBC Aventura")
+
+🔧 Features:
+• Extracts text from PDF statements
+• Parses transaction details
+• Handles various statement formats
+• Auto-categorizes transactions
+
+📞 For manual processing, provide the PDF blob and account name to the function.`;
+
+  ui.alert('PDF Import Information', info, ui.ButtonSet.OK);
 }
 
 function forceLearnCategoriesLowThreshold() {
@@ -7214,5 +7360,60 @@ function testHistoricalIntegration() {
   } catch (error) {
     _logError('Error in historical integration test', error);
     return false;
+  }
+}
+
+function testPayPalProcessing() {
+  try {
+    _logInfo('=== PAYPAL PROCESSING TEST ===');
+    
+    // Test 1: Check PayPal sender detection
+    const testSenders = [
+      'service@intl.paypal.com',
+      'paypal@paypal.com',
+      'notifications@paypal.com'
+    ];
+    
+    testSenders.forEach(sender => {
+      const senderInfo = _detectSender(sender, 'PayPal Test Subject', 'PayPal test body');
+      _logInfo(`Sender detection for ${sender}:`, senderInfo);
+    });
+    
+    // Test 2: Check PayPal keywords detection
+    const testSubjects = [
+      'You authorized a payment to UBER EATS',
+      'PayPal payment confirmation',
+      'Payment sent via PayPal'
+    ];
+    
+    testSubjects.forEach(subject => {
+      const senderInfo = _detectSender('service@intl.paypal.com', subject, 'PayPal authorized payment body');
+      _logInfo(`Subject detection for "${subject}":`, senderInfo);
+    });
+    
+    // Test 3: Mock PayPal email parsing
+    const mockMessage = {
+      getFrom: () => 'service@intl.paypal.com',
+      getSubject: () => 'You authorized a payment to UBER EATS',
+      getBody: () => 'You authorized a payment of US$25.50 CAD to UBER EATS. Your payment was funded with CIBC ••6271.',
+      getDate: () => new Date(),
+      getId: () => 'test-paypal-email-123'
+    };
+    
+    const parseResult = _parsePayPalEmailEnhanced(
+      mockMessage, 
+      mockMessage.getSubject(),
+      mockMessage.getBody(),
+      SENDER_PROFILES.paypal
+    );
+    
+    _logInfo('PayPal parsing result:', parseResult);
+    
+    _logInfo('=== PAYPAL PROCESSING TEST COMPLETED ===');
+    return parseResult;
+    
+  } catch (error) {
+    _logError('Error in PayPal processing test', error);
+    return null;
   }
 }
