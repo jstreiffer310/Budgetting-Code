@@ -545,47 +545,6 @@ function _extractBankName(accountName) {
   return 'Unknown';
 }
 
-function _ensureSheetsAndHeaders() {
-  const ss = _ss();
-  
-  function ensureSheet(name, headers) {
-    let sheet = ss.getSheetByName(name);
-    if (!sheet) {
-      sheet = ss.insertSheet(name);
-      _logInfo(`Created sheet: ${name}`);
-    }
-    
-    if (headers && headers.length > 0 && sheet.getLastRow() === 0) {
-      const safeHeaders = headers.map(h => String(h || 'Column').trim());
-      if (safeHeaders.every(h => h.length > 0)) {
-        sheet.appendRow(safeHeaders);
-        sheet.getRange(1, 1, 1, safeHeaders.length).setFontWeight('bold').setBackground('#f0f0f0');
-        _logInfo(`Added headers to sheet: ${name}`);
-      }
-    }
-    
-    return sheet;
-  }
-  
-  try {
-    ensureSheet(SHEET_NAMES.MAIN, ['Date', 'Amount', 'From', 'To', 'Bank', 'Notes', 'EmailId', 'Category', 'Type', 'Fingerprint']);
-    ensureSheet(SHEET_NAMES.ACCOUNTS, ['Account', 'Balance', 'Last Updated', 'Type']);
-    ensureSheet(SHEET_NAMES.HOLDINGS, ['Account', 'Ticker', 'Shares', 'Unit Price (CAD)', 'Total Value (CAD)', 'Last Updated']);
-    ensureSheet(SHEET_NAMES.STAGING, ['Date', 'Amount', 'From', 'To', 'Bank', 'EmailId', 'StagedAt', 'Direction', 'Status', 'Fingerprint']);
-    ensureSheet(SHEET_NAMES.CATEGORIES, ['Keyword', 'Category']);
-    ensureSheet(SHEET_NAMES.NETWORTH, ['Date', 'Net Worth']);
-    ensureSheet(SHEET_NAMES.DASHBOARD, []);
-    ensureSheet(SHEET_NAMES.CSV_IMPORT, []);
-    ensureSheet(SHEET_NAMES.AUDIT_LOG, ['Timestamp', 'Level', 'Message', 'Context', 'User']);
-    
-    _logInfo('All sheets ensured successfully');
-    
-  } catch (error) {
-    _logError('Failed to ensure sheets and headers', error);
-    throw error;
-  }
-}
-
 // ===================== TRANSACTION FINGERPRINTING =====================
 
 function _generateFingerprint(transaction) {
@@ -1242,8 +1201,6 @@ function _parseInteracEmailEnhanced(message, subject, body, senderProfile) {
 
 // ENHANCED: Wealthsimple Email Parser with sender-aware capabilities
 function _parseWealthsimpleEmailEnhanced(message, subject, body, senderProfile) {
-// ENHANCED: Wealthsimple Email Parser with sender-aware capabilities
-function _parseWealthsimpleEmailEnhanced(message, subject, body, senderProfile) {
   const subjectLower = _lc(subject);
   const bodyLower = _lc(body);
   
@@ -1423,11 +1380,28 @@ function _parsePayPalEmailEnhanced(message, subject, body, senderProfile) {
   // PayPal Authorization detection - Debit transaction
   const authKeywords = ['you authorized', 'authorization', 'authorized payment'];
   
+  _logInfo(`PayPal authorization check`, {
+    authKeywords: authKeywords,
+    subjectMatches: authKeywords.filter(keyword => subjectLower.includes(keyword)),
+    bodyMatches: authKeywords.filter(keyword => bodyLower.includes(keyword))
+  });
+  
   if (authKeywords.some(keyword => subjectLower.includes(keyword) || bodyLower.includes(keyword))) {
+    _logInfo(`PayPal authorization detected!`);
+    
     // Extract amount - PayPal often uses USD amounts
-    const usdAmountMatch = body.match(/(?:authorized|payment).*?(?:us\$|usd?\s*)([0-9,]+\.[0-9]+)/i) ||
-                          subject.match(/(?:authorized|payment).*?(?:us\$|usd?\s*)([0-9,]+\.[0-9]+)/i);
+    const usdAmountMatch = body.match(/(?:authorized|payment|to).*?(?:us\$|usd?\s*)([0-9,]+\.[0-9]+)/i) ||
+                          subject.match(/(?:authorized|payment|to).*?(?:us\$|usd?\s*)([0-9,]+\.[0-9]+)/i) ||
+                          body.match(/us\$([0-9,]+\.[0-9]+)/i) ||
+                          subject.match(/us\$([0-9,]+\.[0-9]+)/i);
+    
     const cadAmountMatch = body.match(/\$([0-9,]+\.[0-9]+)\s+cad/i);
+    
+    _logInfo(`PayPal amount extraction`, {
+      usdMatch: usdAmountMatch ? usdAmountMatch[1] : null,
+      cadMatch: cadAmountMatch ? cadAmountMatch[1] : null,
+      bodySegment: body.substring(0, 300)
+    });
     
     let amount = 0;
     let currency = 'CAD';
@@ -1877,7 +1851,7 @@ function _processNewEmails() {
     const threads = GmailApp.search(searchQuery);
     let processedCount = 0, stagedCount = 0;
     
-    _logInfo(`Processing ${threads.length} email threads`);
+    _logInfo(`Processing ${threads.length} email threads with query: ${searchQuery}`);
     
     threads.forEach(thread => {
       thread.getMessages().forEach(message => {
@@ -1890,6 +1864,13 @@ function _processNewEmails() {
           const plainBody = message.getPlainBody() || '';
           const htmlBody = _htmlToText(message.getBody() || '');
           const body = plainBody + '\n' + htmlBody;
+          
+          _logInfo(`Processing email`, {
+            emailId: emailId,
+            from: message.getFrom(),
+            subject: subject.substring(0, 100),
+            isPayPalEmail: from.includes('paypal')
+          });
           
           let transaction = null;
           
@@ -3281,18 +3262,6 @@ function refreshHoldings() {
   _refreshHoldingsData();
 }
 
-function processNewEmails() {
-  _processNewEmails();
-}
-
-function pairStagedTransfers() {
-  _pairStagedTransfers();
-}
-
-function cleanupStaleTransactions() {
-  _cleanupStaleTransactions();
-}
-
 function updateNetWorth() {
   _updateNetWorth();
 }
@@ -3694,6 +3663,53 @@ function testEmailParsing() {
       `Email parsing test failed: ${error.message}`,
       SpreadsheetApp.getUi().ButtonSet.OK
     );
+  }
+}
+
+function debugPayPalEmails() {
+  try {
+    _logInfo('=== PAYPAL EMAIL DEBUG START ===');
+    
+    // Search specifically for PayPal emails
+    const paypalThreads = GmailApp.search('from:paypal.com OR from:intl.paypal.com newer_than:30d');
+    _logInfo(`Found ${paypalThreads.length} PayPal email threads`);
+    
+    paypalThreads.forEach((thread, threadIndex) => {
+      thread.getMessages().forEach((message, msgIndex) => {
+        const from = message.getFrom();
+        const subject = message.getSubject();
+        const body = message.getPlainBody() || message.getBody();
+        
+        _logInfo(`PayPal Email ${threadIndex}-${msgIndex}`, {
+          from: from,
+          subject: subject,
+          bodyPreview: body.substring(0, 200),
+          date: message.getDate()
+        });
+        
+        // Test sender identification
+        const sender = _identifyEmailSender(from, subject, body);
+        _logInfo(`Sender identification result`, {
+          senderId: sender.id,
+          confidence: sender.confidence,
+          profileName: sender.profile ? sender.profile.name : 'none'
+        });
+        
+        // Test PayPal parser if identified correctly
+        if (sender.id === 'paypal') {
+          const transaction = _parsePayPalEmailEnhanced(message, subject, body, sender.profile);
+          _logInfo(`PayPal parser result`, {
+            transaction: transaction ? 'SUCCESS' : 'FAILED',
+            details: transaction
+          });
+        }
+      });
+    });
+    
+    _logInfo('=== PAYPAL EMAIL DEBUG END ===');
+    
+  } catch (error) {
+    _logError('PayPal debug failed', error);
   }
 }
 
