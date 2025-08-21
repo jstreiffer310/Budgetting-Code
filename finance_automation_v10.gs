@@ -7,7 +7,7 @@
  * 
  * INTEGRATED FEATURES:
  * - V8's comprehensive email parsing and transaction processing engine
- * - V9's advanced investment holdings management (stocks, crypto, SHIB precision)
+ * - V9's advanced investment holdings management (stocks, ETFs)
  * - Enhanced merchant-based categorization (avoiding generic keywords)
  * - Improved dashboard with better expense analysis
  * - Robust error handling and recovery mechanisms
@@ -16,7 +16,7 @@
  * 
  * IMPROVEMENTS OVER V8/V9:
  * - Merchant-focused categorization (not generic banking terms)
- * - Enhanced SHIB and crypto price fetching precision
+ * - Enhanced stock and ETF price fetching precision
  * - Better Canadian stock support (VCE.TO, XEQT.TO)
  * - Improved dashboard analytics and visualization
  * - Comprehensive transaction review and validation
@@ -97,7 +97,6 @@ const CONFIG = {
   STALE_CLEANUP_HOURS: 72,
   MAX_PROCESSING_ATTEMPTS: 3,
   DASHBOARD_ANALYSIS_DAYS: 30,
-  CRYPTO_API_RATE_LIMIT: 300,
   YAHOO_FINANCE_RATE_LIMIT: 200
 };
 
@@ -762,7 +761,7 @@ const SENDER_PROFILES = {
     domains: ['wealthsimple.com', 'email.wealthsimple.com'],
     capabilities: {
       merchantInfo: 'ticker_symbols',   // Stock/ETF symbols and company names
-      accountInfo: 'excellent',        // RRSP, TFSA, Cash, Crypto
+      accountInfo: 'excellent',        // RRSP, TFSA, Cash
       amountPrecision: 'high',         // Exact amounts and shares
       transactionTiming: 'delayed',    // Usually next business day
       recipientInfo: 'none',           // N/A for investment transactions
@@ -1506,24 +1505,7 @@ function _parseWealthsimpleHoldingsFromEmail(emailBody) {
       }
     }
     
-    // Pattern 2: Crypto holdings (for high precision coins like SHIB)
-    const cryptoPattern = /(BTC|ETH|DOT|SOL|SHIB)\s*[:,]?\s*([0-9,]+\.?\d*)\s*(?:coins?|shares?)\s*@?\s*\$?([0-9,]+\.?\d+)/gi;
-    let cryptoMatch;
-    while ((cryptoMatch = cryptoPattern.exec(emailBody)) !== null) {
-      const symbol = cryptoMatch[1].toUpperCase();
-      const shares = parseFloat(cryptoMatch[2].replace(/,/g, ''));
-      const price = parseFloat(cryptoMatch[3].replace(/,/g, ''));
-      
-      holdings.push({
-        ticker: symbol + '-USD',
-        shares: shares,
-        price: price,
-        value: shares * price,
-        account: 'Wealthsimple'
-      });
-    }
-    
-    // Pattern 3: Individual line format "TICKER: X.XX shares at $Y.YY"
+    // Pattern 2: Individual line format "TICKER: X.XX shares at $Y.YY"
     const individualPattern = /([A-Z]{2,5}(?:\.TO)?)\s*:\s*([0-9,]+\.?\d*)\s*(?:shares?|units?)\s*(?:at\s*)?\$?([0-9,]+\.?\d+)/gi;
     let individualMatch;
     while ((individualMatch = individualPattern.exec(emailBody)) !== null) {
@@ -1647,13 +1629,6 @@ function _updateAllHoldingsFromEmail(holdingsData) {
         
         _logInfo(`Added new holding from email: ${holding.ticker} - ${holding.shares} shares`);
       }
-      
-      // Apply special formatting for SHIB
-      if (holding.ticker.includes('SHIB')) {
-        const currentRow = existingRow > 0 ? existingRow : holdingsSheet.getLastRow();
-        holdingsSheet.getRange(currentRow, 2).setNumberFormat('0.000000'); // Shares
-        holdingsSheet.getRange(currentRow, 4).setNumberFormat('0.00000000'); // Price
-      }
     }
     
     _logInfo(`Holdings update from email completed: ${updatedCount} holdings processed`);
@@ -1686,11 +1661,6 @@ function _refreshSingleHolding(ticker) {
       holdingsSheet.getRange(existingRow, 4).setValue(price);      // Current Price
       holdingsSheet.getRange(existingRow, 5).setValue(currentValue); // Current Value
       holdingsSheet.getRange(existingRow, 7).setValue(new Date());   // Last Updated
-      
-      // Apply special formatting for SHIB
-      if (ticker.includes('SHIB') && price < 0.01) {
-        holdingsSheet.getRange(existingRow, 4).setNumberFormat('0.00000000');
-      }
       
       _logInfo(`Refreshed ${ticker}: ${shares} shares @ $${price.toFixed(6)} = $${currentValue.toFixed(2)}`);
     } else {
@@ -2119,7 +2089,7 @@ function _cleanupStaleTransactions() {
   }
 }
 
-// ===================== PRICE FETCHING (Enhanced for Canadian stocks & SHIB) =====================
+// ===================== PRICE FETCHING (Enhanced for Canadian stocks) =====================
 
 function _getUsdToCadRate() {
   try {
@@ -2154,7 +2124,7 @@ function _buildGoogleFinanceFormula(ticker) {
   }
 }
 
-// ENHANCED: High-precision cryptocurrency price fetching (especially for SHIB)
+// ENHANCED: High-precision price fetching for stocks and ETFs
 function _fetchYahooFinancePrice(ticker) {
   try {
     let yahooTicker = ticker;
@@ -2287,23 +2257,10 @@ function _refreshHoldingsData() {
         
         updatedCount++;
         
-        // Special formatting for high-precision crypto prices (SHIB)
-        if (ticker.toUpperCase().includes('SHIB')) {
-          const priceCell = holdingsSheet.getRange(i + 2, 4);
-          const sharesCell = holdingsSheet.getRange(i + 2, 3);
-          const valueCell = holdingsSheet.getRange(i + 2, 5);
-          
-          priceCell.setNumberFormat('0.00000000'); // 8 decimal places for SHIB price
-          sharesCell.setNumberFormat('#,##0.000000'); // Shares with commas and 6 decimals
-          valueCell.setNumberFormat('$#,##0.00'); // Standard currency format for value
-          
-          _logInfo(`Updated ${ticker}: ${shares.toLocaleString()} shares @ $${price.toFixed(8)} = $${currentValue.toFixed(2)} (Account: ${account}) - SHIB HIGH PRECISION`);
-        } else {
-          // Standard formatting for other assets
-          holdingsSheet.getRange(i + 2, 4).setNumberFormat('$#,##0.00');
-          holdingsSheet.getRange(i + 2, 5).setNumberFormat('$#,##0.00');
-          _logInfo(`Updated ${ticker}: ${shares} shares @ $${price.toFixed(6)} = $${currentValue.toFixed(2)} (Account: ${account})`);
-        }
+        // Standard formatting for all assets
+        holdingsSheet.getRange(i + 2, 4).setNumberFormat('$#,##0.00');
+        holdingsSheet.getRange(i + 2, 5).setNumberFormat('$#,##0.00');
+        _logInfo(`Updated ${ticker}: ${shares} shares @ $${price.toFixed(6)} = $${currentValue.toFixed(2)} (Account: ${account})`);
       }
     }
     
@@ -3539,7 +3496,6 @@ function showConfiguration() {
     'Pairing Window': `${CONFIG.PAIRING_WINDOW_MS / (1000 * 60 * 60)} hours`,
     'Stale Cleanup': `${CONFIG.STALE_CLEANUP_HOURS} hours`,
     'Supported Banks': SUPPORTED_BANKS.join(', '),
-    'Cryptocurrency Support': Object.keys(CRYPTO_MAPPINGS).length + ' tokens',
     'Canadian Stock Support': CANADIAN_TICKERS.size + ' tickers'
   };
   
@@ -3750,12 +3706,6 @@ function _repairHoldingsData() {
       if (!data[i][COLUMNS.HOLDINGS.LAST_UPDATED - 1]) {
         holdingsSheet.getRange(row, COLUMNS.HOLDINGS.LAST_UPDATED).setValue(new Date());
         repairedCount++;
-      }
-      
-      // Fix SHIB precision formatting
-      if (ticker && ticker.toUpperCase().includes('SHIB')) {
-        const priceCell = holdingsSheet.getRange(row, COLUMNS.HOLDINGS.PRICE);
-        priceCell.setNumberFormat('0.000000');
       }
     }
     
@@ -3970,36 +3920,6 @@ function reviewPendingTransactions() {
   }
 }
 
-// Test SHIB price fetching (from additional_fixes.js)
-function testShibPriceFetch() {
-  try {
-    // Test API fetch
-    const price = _fetchCryptoPriceWithPrecision('SHIB');
-    let message = `SHIB API price: $${price.toFixed(8)} CAD\n\n`;
-    
-    // Test manual calculation
-    const shares = 693136.684119;
-    const manualPrice = 0.00003200; // $0.000032 CAD
-    const calculatedValue = shares * manualPrice;
-    
-    message += `Manual calculation:\n`;
-    message += `${shares.toLocaleString()} shares\n`;
-    message += `× $${manualPrice.toFixed(8)} CAD\n`;
-    message += `= $${calculatedValue.toFixed(2)} CAD\n\n`;
-    message += `Expected: ~$22.18 CAD`;
-    
-    _logInfo(message);
-    try { 
-      SpreadsheetApp.getUi().alert('SHIB Test Results', message, SpreadsheetApp.getUi().ButtonSet.OK); 
-    } catch (e) {}
-  } catch (error) {
-    _logError('Failed to test SHIB', error);
-    try { 
-      SpreadsheetApp.getUi().alert('Failed to test SHIB: ' + error.message); 
-    } catch (e) {}
-  }
-}
-
 function diagnosticCategoryLearning() {
   try {
     _logInfo('=== DIAGNOSTIC CATEGORY LEARNING ANALYSIS ===');
@@ -4162,114 +4082,10 @@ function diagnosticCategoryLearning() {
   }
 }
 
-// Test Yahoo Finance crypto support specifically
-function testYahooFinanceCrypto() {
-  try {
-    _logInfo('=== Testing Yahoo Finance Crypto Support ===');
-    
-    const cryptos = ['BTC', 'ETH', 'SHIB'];
-    const results = {};
-    
-    for (const crypto of cryptos) {
-      _logInfo(`\n--- Testing ${crypto} on Yahoo Finance ---`);
-      
-      // Test CAD ticker
-      try {
-        const cadTicker = `${crypto}-CAD`;
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(cadTicker)}`;
-        _logInfo(`Testing ${cadTicker}: ${url}`);
-        
-        const response = UrlFetchApp.fetch(url, {
-          muteHttpExceptions: true,
-          timeout: 10000
-        });
-        
-        _logInfo(`Response code for ${cadTicker}: ${response.getResponseCode()}`);
-        
-        if (response.getResponseCode() === 200) {
-          const data = JSON.parse(response.getContentText());
-          if (data && data.chart && data.chart.result && data.chart.result[0]) {
-            const result = data.chart.result[0];
-            if (result.meta && result.meta.regularMarketPrice) {
-              const price = parseFloat(result.meta.regularMarketPrice);
-              _logInfo(`✓ ${crypto}-CAD: $${price.toFixed(8)}`);
-              results[crypto] = price;
-              continue;
-            }
-          }
-        }
-        _logInfo(`${cadTicker} failed or invalid response`);
-      } catch (cadError) {
-        _logInfo(`${crypto}-CAD error: ${cadError.message}`);
-      }
-      
-      // Test USD ticker
-      try {
-        const usdTicker = `${crypto}-USD`;
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(usdTicker)}`;
-        _logInfo(`Testing ${usdTicker}: ${url}`);
-        
-        const response = UrlFetchApp.fetch(url, {
-          muteHttpExceptions: true,
-          timeout: 10000
-        });
-        
-        if (response.getResponseCode() === 200) {
-          const data = JSON.parse(response.getContentText());
-          if (data && data.chart && data.chart.result && data.chart.result[0]) {
-            const result = data.chart.result[0];
-            if (result.meta && result.meta.regularMarketPrice) {
-              const usdPrice = parseFloat(result.meta.regularMarketPrice);
-              const cadPrice = usdPrice * 1.37;
-              _logInfo(`✓ ${crypto}-USD: $${usdPrice.toFixed(8)} USD = $${cadPrice.toFixed(8)} CAD`);
-              results[crypto] = cadPrice;
-              continue;
-            }
-          }
-        }
-        _logInfo(`${usdTicker} failed or invalid response`);
-      } catch (usdError) {
-        _logInfo(`${crypto}-USD error: ${usdError.message}`);
-      }
-      
-      results[crypto] = 0;
-    }
-    
-    // Summary
-    _logInfo('\n=== Yahoo Finance Crypto Test Results ===');
-    let message = '';
-    let successCount = 0;
-    
-    for (const [crypto, price] of Object.entries(results)) {
-      const status = price > 0 ? `$${price.toFixed(6)}` : 'FAILED';
-      _logInfo(`${crypto}: ${status}`);
-      message += `${crypto}: ${status}\n`;
-      if (price > 0) successCount++;
-    }
-    
-    if (successCount > 0) {
-      message += `\n✓ Yahoo Finance works for ${successCount}/${cryptos.length} cryptos!`;
-      message += '\nThis means we can use Yahoo Finance instead of rate-limited crypto APIs.';
-    } else {
-      message += '\n❌ Yahoo Finance doesn\'t support crypto tickers.';
-      message += '\nWe\'ll need to use fallback prices until crypto APIs work.';
-    }
-    
-    SpreadsheetApp.getUi().alert('Yahoo Finance Crypto Test', message, SpreadsheetApp.getUi().ButtonSet.OK);
-    
-  } catch (error) {
-    _logError('Yahoo Finance crypto test failed', error);
-    SpreadsheetApp.getUi().alert('Test failed: ' + error.message);
-  }
-}// ===================== INITIALIZATION & CURRENT HOLDINGS DATA =====================
+// ===================== INITIALIZATION & CURRENT HOLDINGS DATA =====================
 
 // Current holdings data (as of August 20, 2025) - Based on Wealthsimple screenshot
 const CURRENT_HOLDINGS = {
-  'BTC': { shares: 0.000176, ticker: 'BTC', name: 'Bitcoin', account: 'Wealthsimple Crypto' },
-  'DOT': { shares: 1.965129, ticker: 'DOT', name: 'Polkadot', account: 'Wealthsimple Crypto' },
-  'ETH': { shares: 0.006272, ticker: 'ETH', name: 'Ethereum', account: 'Wealthsimple Crypto' },
-  'SHIB': { shares: 693136.684119, ticker: 'SHIB', name: 'Shiba Inu', account: 'Wealthsimple Crypto' },
-  'SOL': { shares: 0.009404, ticker: 'SOL', name: 'Solana', account: 'Wealthsimple Crypto' },
   'VCE': { shares: 20.0121, ticker: 'VCE', name: 'Vanguard FTSE Canada Index ETF', account: 'Wealthsimple RRSP' },
   'XEQT': { shares: 13.541, ticker: 'XEQT', name: 'iShares Core Equity ETF Portfolio', account: 'Wealthsimple RRSP' }
 };
@@ -4309,13 +4125,6 @@ function initializeHoldingsData() {
       ];
       
       holdingsSheet.appendRow(row);
-      
-      // Apply special formatting for SHIB (high precision)
-      if (symbol === 'SHIB') {
-        const currentRow = holdingsSheet.getLastRow();
-        holdingsSheet.getRange(currentRow, 2).setNumberFormat('0.000000'); // Shares
-        holdingsSheet.getRange(currentRow, 4).setNumberFormat('0.00000000'); // Price
-      }
     }
     
     _logInfo(`Initialized ${Object.keys(CURRENT_HOLDINGS).length} holdings in the portfolio`);
