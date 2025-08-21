@@ -107,7 +107,6 @@ const MY_ACCOUNTS = [
   'CIBC Aventura', 
   'CIBC Dividend',
   'Wealthsimple RRSP',
-  'Wealthsimple Crypto',
   'Wealthsimple Cash'
 ];
 
@@ -119,7 +118,6 @@ const ACCOUNT_ALIASES = {
   'aventura': 'CIBC Aventura',
   'dividend': 'CIBC Dividend',
   'rrsp': 'Wealthsimple RRSP',
-  'crypto': 'Wealthsimple Crypto',
   'wealthsimple': 'Wealthsimple Cash',
   'cash': '', // CRITICAL: Prevents "Cash" phantom accounts
   'retirey mcretireface': 'Wealthsimple RRSP' // From your data
@@ -135,19 +133,6 @@ const BANK_ALIASES = {
   'Wealthsimple Deposit': 'Wealthsimple Deposit',
   'Wealthsimple Trade': 'Wealthsimple Trade',
   'Interac Deposit': 'Interac Deposit'
-};
-
-// Cryptocurrency mappings (including your SHIB holdings)
-const CRYPTO_MAPPINGS = {
-  'BTC': 'bitcoin',
-  'ETH': 'ethereum', 
-  'DOT': 'polkadot',
-  'SOL': 'solana',
-  'SHIB': 'shiba-inu',
-  'SHIB-USD': 'shiba-inu',
-  'ADA': 'cardano',
-  'MATIC': 'matic-network',
-  'DOGE': 'dogecoin'
 };
 
 // Canadian stock exchanges for proper price fetching
@@ -1635,98 +1620,6 @@ function _buildGoogleFinanceFormula(ticker) {
 }
 
 // ENHANCED: High-precision cryptocurrency price fetching (especially for SHIB)
-function _fetchCryptoPriceWithPrecision(ticker) {
-  try {
-    const tickerUpper = ticker.toUpperCase();
-    
-    // Map simple ticker to CoinGecko ID
-    const cryptoIdMap = {
-      'BTC': 'bitcoin',
-      'ETH': 'ethereum', 
-      'SOL': 'solana',
-      'DOT': 'polkadot',
-      'SHIB': 'shiba-inu',
-      'ADA': 'cardano',
-      'MATIC': 'matic-network',
-      'AVAX': 'avalanche-2'
-    };
-    
-    let cryptoId = cryptoIdMap[tickerUpper];
-    
-    // Fallback to old mapping system
-    if (!cryptoId) {
-      cryptoId = CRYPTO_MAPPINGS[tickerUpper.replace('-USD', '')] || CRYPTO_MAPPINGS[tickerUpper];
-    }
-    
-    if (!cryptoId) {
-      _logError(`No crypto mapping found for ${ticker}`);
-      return 0;
-    }
-    
-    // Try CoinGecko first
-    try {
-      const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=cad&precision=18`;
-      const response = UrlFetchApp.fetch(url, { 
-        muteHttpExceptions: true,
-        headers: { 'Accept': 'application/json' } 
-      });
-      
-      if (response.getResponseCode() === 200) {
-        const data = JSON.parse(response.getContentText());
-        
-        if (data && data[cryptoId] && data[cryptoId].cad) {
-          const price = parseFloat(data[cryptoId].cad);
-          _logInfo(`Fetched ${ticker} price: $${price.toFixed(8)} CAD from CoinGecko`);
-          return price;
-        }
-      } else {
-        _logError(`CoinGecko API error for ${ticker}: ${response.getResponseCode()}`);
-      }
-    } catch (cgError) {
-      _logError(`CoinGecko fetch failed for ${ticker}`, cgError);
-    }
-    
-    // Fallback to CoinCap API
-    try {
-      const coinCapMap = {
-        'BTC': 'bitcoin',
-        'ETH': 'ethereum',
-        'SOL': 'solana', 
-        'DOT': 'polkadot',
-        'SHIB': 'shiba-inu'
-      };
-      
-      const coinCapId = coinCapMap[tickerUpper];
-      if (coinCapId) {
-        const url = `https://api.coincap.io/v2/assets/${coinCapId}`;
-        const response = UrlFetchApp.fetch(url, { 
-          muteHttpExceptions: true,
-          headers: { 'Accept': 'application/json' }
-        });
-        
-        if (response.getResponseCode() === 200) {
-          const data = JSON.parse(response.getContentText());
-          if (data && data.data && data.data.priceUsd) {
-            const usdPrice = parseFloat(data.data.priceUsd);
-            // Convert USD to CAD (approximate rate 1.37)
-            const cadPrice = usdPrice * 1.37;
-            _logInfo(`Fetched ${ticker} price: $${cadPrice.toFixed(8)} CAD from CoinCap (USD: $${usdPrice})`);
-            return cadPrice;
-          }
-        }
-      }
-    } catch (ccError) {
-      _logError(`CoinCap fetch failed for ${ticker}`, ccError);
-    }
-    
-    _logError(`All price sources failed for ${ticker}`);
-    return 0;
-  } catch (error) {
-    _logError(`Failed to fetch crypto price for ${ticker}`, error);
-    return 0;
-  }
-}
-
 function _fetchYahooFinancePrice(ticker) {
   try {
     let yahooTicker = ticker;
@@ -1772,12 +1665,6 @@ function _fetchPriceFromAPI(ticker) {
     
     const tickerUpper = ticker.toUpperCase();
     
-    // Check if it's a cryptocurrency (simple ticker format)
-    const cryptoList = ['BTC', 'ETH', 'SOL', 'DOT', 'SHIB', 'ADA', 'MATIC', 'AVAX'];
-    if (cryptoList.includes(tickerUpper)) {
-      return _fetchCryptoPriceWithPrecision(tickerUpper);
-    }
-    
     // For Canadian ETFs, add .TO suffix for Yahoo Finance
     let yahooTicker = ticker;
     if (['VCE', 'XEQT', 'VTI', 'VXUS', 'VFV'].includes(tickerUpper)) {
@@ -1797,11 +1684,6 @@ function _isSupportedTicker(ticker) {
   if (!ticker) return false;
   
   const tickerUpper = ticker.toUpperCase();
-  
-  // Check if it's a cryptocurrency
-  if (Object.keys(CRYPTO_MAPPINGS).some(key => tickerUpper.includes(key))) {
-    return true;
-  }
   
   // Check for Canadian stocks
   if (tickerUpper.endsWith('-TSE') || tickerUpper.includes('.TO')) {
@@ -2333,7 +2215,8 @@ function onOpen() {
     .addItem('🧪 Test Email Parsing', 'testEmailParsing')
     .addItem('💰 Test SHIB Price', 'testShibPriceFetch')
     .addItem('🔍 Test All Prices', 'testAllCryptoPrices')
-    .addItem('⚙️ Set Manual Prices', 'setManualCryptoPrices')
+    .addItem('🌐 Test Crypto APIs', 'testCryptoApiCalls')
+    .addItem('📈 Test Yahoo Crypto', 'testYahooFinanceCrypto')
     .addToUi();
 }
 
@@ -3009,71 +2892,106 @@ function testAllCryptoPrices() {
   }
 }
 
-// Manual price override for when APIs fail
-function setManualCryptoPrices() {
+// Test Yahoo Finance crypto support specifically
+function testYahooFinanceCrypto() {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const holdingsSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+    _logInfo('=== Testing Yahoo Finance Crypto Support ===');
     
-    if (!holdingsSheet) {
-      throw new Error('Holdings sheet not found');
-    }
+    const cryptos = ['BTC', 'ETH', 'SHIB'];
+    const results = {};
     
-    // Approximate current prices as of August 2025 (CAD)
-    const manualPrices = {
-      'BTC': 89500.00,    // ~$89,500 CAD
-      'ETH': 4200.00,     // ~$4,200 CAD  
-      'SOL': 195.00,      // ~$195 CAD
-      'DOT': 7.25,        // ~$7.25 CAD
-      'SHIB': 0.00003200, // ~$0.000032 CAD (8 decimal places)
-      'VCE': 60.78,       // From working Yahoo Finance
-      'XEQT': 37.20       // From working Yahoo Finance
-    };
-    
-    let updatedCount = 0;
-    const lastRow = holdingsSheet.getLastRow();
-    
-    for (let i = 2; i <= lastRow; i++) {
-      const ticker = holdingsSheet.getRange(i, 2).getValue(); // Column B: Ticker
-      const shares = parseFloat(holdingsSheet.getRange(i, 3).getValue() || 0); // Column C: Shares
+    for (const crypto of cryptos) {
+      _logInfo(`\n--- Testing ${crypto} on Yahoo Finance ---`);
       
-      if (ticker && manualPrices[ticker] && shares > 0) {
-        const price = manualPrices[ticker];
-        const totalValue = shares * price;
+      // Test CAD ticker
+      try {
+        const cadTicker = `${crypto}-CAD`;
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(cadTicker)}`;
+        _logInfo(`Testing ${cadTicker}: ${url}`);
         
-        holdingsSheet.getRange(i, 4).setValue(price); // Column D: Unit Price
-        holdingsSheet.getRange(i, 5).setValue(totalValue); // Column E: Total Value
-        holdingsSheet.getRange(i, 6).setValue(new Date()); // Column F: Last Updated
+        const response = UrlFetchApp.fetch(url, {
+          muteHttpExceptions: true,
+          timeout: 10000
+        });
         
-        // Special formatting for SHIB - ultra high precision
-        if (ticker === 'SHIB') {
-          holdingsSheet.getRange(i, 4).setNumberFormat('0.00000000'); // 8 decimal places for price
-          holdingsSheet.getRange(i, 3).setNumberFormat('#,##0.000000'); // 6 decimal places for shares with commas
-          _logInfo(`SHIB special formatting: ${shares.toLocaleString()} shares × $${price.toFixed(8)} = $${totalValue.toFixed(2)}`);
-        } else {
-          // Standard formatting for other assets
-          holdingsSheet.getRange(i, 4).setNumberFormat('$#,##0.00');
-          holdingsSheet.getRange(i, 5).setNumberFormat('$#,##0.00');
+        _logInfo(`Response code for ${cadTicker}: ${response.getResponseCode()}`);
+        
+        if (response.getResponseCode() === 200) {
+          const data = JSON.parse(response.getContentText());
+          if (data && data.chart && data.chart.result && data.chart.result[0]) {
+            const result = data.chart.result[0];
+            if (result.meta && result.meta.regularMarketPrice) {
+              const price = parseFloat(result.meta.regularMarketPrice);
+              _logInfo(`✓ ${crypto}-CAD: $${price.toFixed(8)}`);
+              results[crypto] = price;
+              continue;
+            }
+          }
         }
-        
-        updatedCount++;
-        _logInfo(`Manually set ${ticker}: ${shares} × $${price} = $${totalValue.toFixed(2)}`);
+        _logInfo(`${cadTicker} failed or invalid response`);
+      } catch (cadError) {
+        _logInfo(`${crypto}-CAD error: ${cadError.message}`);
       }
+      
+      // Test USD ticker
+      try {
+        const usdTicker = `${crypto}-USD`;
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(usdTicker)}`;
+        _logInfo(`Testing ${usdTicker}: ${url}`);
+        
+        const response = UrlFetchApp.fetch(url, {
+          muteHttpExceptions: true,
+          timeout: 10000
+        });
+        
+        if (response.getResponseCode() === 200) {
+          const data = JSON.parse(response.getContentText());
+          if (data && data.chart && data.chart.result && data.chart.result[0]) {
+            const result = data.chart.result[0];
+            if (result.meta && result.meta.regularMarketPrice) {
+              const usdPrice = parseFloat(result.meta.regularMarketPrice);
+              const cadPrice = usdPrice * 1.37;
+              _logInfo(`✓ ${crypto}-USD: $${usdPrice.toFixed(8)} USD = $${cadPrice.toFixed(8)} CAD`);
+              results[crypto] = cadPrice;
+              continue;
+            }
+          }
+        }
+        _logInfo(`${usdTicker} failed or invalid response`);
+      } catch (usdError) {
+        _logInfo(`${crypto}-USD error: ${usdError.message}`);
+      }
+      
+      results[crypto] = 0;
     }
     
-    SpreadsheetApp.getUi().alert(
-      'Manual Prices Set',
-      `Updated ${updatedCount} holdings with manual prices.\n\nBTC: $89,500\nETH: $4,200\nSOL: $195\nDOT: $7.25\nSHIB: $0.000032\n\nTotal should now be ~$2,000 CAD`,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
+    // Summary
+    _logInfo('\n=== Yahoo Finance Crypto Test Results ===');
+    let message = '';
+    let successCount = 0;
+    
+    for (const [crypto, price] of Object.entries(results)) {
+      const status = price > 0 ? `$${price.toFixed(6)}` : 'FAILED';
+      _logInfo(`${crypto}: ${status}`);
+      message += `${crypto}: ${status}\n`;
+      if (price > 0) successCount++;
+    }
+    
+    if (successCount > 0) {
+      message += `\n✓ Yahoo Finance works for ${successCount}/${cryptos.length} cryptos!`;
+      message += '\nThis means we can use Yahoo Finance instead of rate-limited crypto APIs.';
+    } else {
+      message += '\n❌ Yahoo Finance doesn\'t support crypto tickers.';
+      message += '\nWe\'ll need to use fallback prices until crypto APIs work.';
+    }
+    
+    SpreadsheetApp.getUi().alert('Yahoo Finance Crypto Test', message, SpreadsheetApp.getUi().ButtonSet.OK);
     
   } catch (error) {
-    _logError('Failed to set manual prices', error);
-    SpreadsheetApp.getUi().alert('Error', 'Failed to set manual prices. Check execution log.');
+    _logError('Yahoo Finance crypto test failed', error);
+    SpreadsheetApp.getUi().alert('Test failed: ' + error.message);
   }
-}
-
-// ===================== INITIALIZATION & CURRENT HOLDINGS DATA =====================
+}// ===================== INITIALIZATION & CURRENT HOLDINGS DATA =====================
 
 // Current holdings data (as of August 20, 2025) - Based on Wealthsimple screenshot
 const CURRENT_HOLDINGS = {
