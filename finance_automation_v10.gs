@@ -705,10 +705,144 @@ function _ensureAccountExists(accountsSheet, accountName) {
   return row;
 }
 
-// ===================== EMAIL PARSING FRAMEWORK =====================
+// ===================== SENDER-AWARE EMAIL PARSING FRAMEWORK =====================
 
-// IMPROVED: CIBC Email Parser
-function _parseCibcEmail(message, subject, body, accountsSheet) {
+// Sender information profiles - defines what data is typically available from each sender
+const SENDER_PROFILES = {
+  'cibc': {
+    name: 'CIBC',
+    domains: ['cibc.com', 'email.cibc.com'],
+    capabilities: {
+      merchantInfo: 'excellent',        // Detailed merchant names and locations
+      accountInfo: 'good',             // Can determine specific card (Aventura/Dividend)
+      amountPrecision: 'high',         // Always includes exact amounts
+      transactionTiming: 'realtime',   // Near real-time notifications
+      recipientInfo: 'none',           // N/A for credit card transactions
+      balanceInfo: 'none'              // Doesn't include balance information
+    },
+    transactionTypes: ['purchase', 'payment', 'refund', 'fee'],
+    accountDetection: 'card_number_suffix',  // Uses last 4 digits to identify card
+    fallbackAccount: 'CIBC Aventura'
+  },
+  
+  'pcfinancial': {
+    name: 'PC Financial',
+    domains: ['pcfinancial.ca', 'email.pcfinancial.ca'],
+    capabilities: {
+      merchantInfo: 'good',            // Usually includes merchant name
+      accountInfo: 'single',           // Only one main account
+      amountPrecision: 'high',         // Exact amounts
+      transactionTiming: 'realtime',   // Real-time for purchases
+      recipientInfo: 'variable',       // e-Transfer recipients available
+      balanceInfo: 'none'              // No balance information
+    },
+    transactionTypes: ['purchase', 'etransfer_sent', 'deposit', 'fee'],
+    accountDetection: 'static',          // Always PC Financial account
+    fallbackAccount: 'PC Financial'
+  },
+  
+  'interac': {
+    name: 'Interac',
+    domains: ['payments.interac.ca', 'interac.ca'],
+    capabilities: {
+      merchantInfo: 'none',            // N/A for e-Transfers
+      accountInfo: 'destination',      // Knows receiving account
+      amountPrecision: 'high',         // Exact amounts
+      transactionTiming: 'realtime',   // Real-time notifications
+      recipientInfo: 'excellent',      // Detailed sender information
+      balanceInfo: 'none'              // No balance information
+    },
+    transactionTypes: ['etransfer_received'],
+    accountDetection: 'recipient_based',  // Based on receiving account
+    fallbackAccount: 'PC Financial'
+  },
+  
+  'wealthsimple': {
+    name: 'Wealthsimple',
+    domains: ['wealthsimple.com', 'email.wealthsimple.com'],
+    capabilities: {
+      merchantInfo: 'ticker_symbols',   // Stock/ETF symbols and company names
+      accountInfo: 'excellent',        // RRSP, TFSA, Cash, Crypto
+      amountPrecision: 'high',         // Exact amounts and shares
+      transactionTiming: 'delayed',    // Usually next business day
+      recipientInfo: 'none',           // N/A for investment transactions
+      balanceInfo: 'portfolio',        // Portfolio summaries available
+      holdingsInfo: 'excellent'        // Detailed holdings data
+    },
+    transactionTypes: ['deposit', 'trade', 'dividend', 'portfolio_update', 'fee'],
+    accountDetection: 'account_type_parsing',  // Parses RRSP/TFSA/etc from content
+    fallbackAccount: 'Wealthsimple Cash'
+  }
+};
+
+// Enhanced sender detection with domain and content analysis
+function _identifyEmailSender(from, subject, body) {
+  const fromLower = _lc(from);
+  const subjectLower = _lc(subject);
+  const bodyLower = _lc(body);
+  
+  // Primary domain-based detection
+  for (const [senderId, profile] of Object.entries(SENDER_PROFILES)) {
+    if (profile.domains.some(domain => fromLower.includes(domain))) {
+      return { id: senderId, profile: profile, confidence: 'high' };
+    }
+  }
+  
+  // Secondary keyword-based detection
+  if (fromLower.includes('cibc') || subjectLower.includes('cibc') || /cibc.*card/i.test(bodyLower)) {
+    return { id: 'cibc', profile: SENDER_PROFILES.cibc, confidence: 'medium' };
+  }
+  
+  if (fromLower.includes('pcfinancial') || fromLower.includes('pc financial') || 
+      subjectLower.includes('pc mastercard') || /pc.*financial/i.test(bodyLower)) {
+    return { id: 'pcfinancial', profile: SENDER_PROFILES.pcfinancial, confidence: 'medium' };
+  }
+  
+  if (fromLower.includes('interac') || fromLower.includes('payments.interac') ||
+      subjectLower.includes('interac') || /interac.*transfer/i.test(bodyLower)) {
+    return { id: 'interac', profile: SENDER_PROFILES.interac, confidence: 'medium' };
+  }
+  
+  if (fromLower.includes('wealthsimple') || subjectLower.includes('wealthsimple') ||
+      /wealthsimple.*trade/i.test(bodyLower) || /portfolio.*update/i.test(bodyLower)) {
+    return { id: 'wealthsimple', profile: SENDER_PROFILES.wealthsimple, confidence: 'medium' };
+  }
+  
+  return { id: 'unknown', profile: null, confidence: 'none' };
+}
+
+// Adaptive parsing strategy based on sender capabilities
+function _parseEmailWithSenderContext(message, subject, body, accountsSheet) {
+  const sender = _identifyEmailSender(message.getFrom(), subject, body);
+  
+  _logInfo(`Parsing email from ${sender.id} (confidence: ${sender.confidence})`, {
+    emailId: message.getId(),
+    from: message.getFrom(),
+    subject: subject.substring(0, 50)
+  });
+  
+  if (!sender.profile) {
+    _logWarning(`Unknown sender - using fallback parsing`, { from: message.getFrom() });
+    return _parseFallbackEmail(message, subject, body);
+  }
+  
+  // Use sender-specific parsing logic
+  switch (sender.id) {
+    case 'cibc':
+      return _parseCibcEmailEnhanced(message, subject, body, accountsSheet, sender.profile);
+    case 'pcfinancial':
+      return _parsePcFinancialEmailEnhanced(message, subject, body, sender.profile);
+    case 'interac':
+      return _parseInteracEmailEnhanced(message, subject, body, sender.profile);
+    case 'wealthsimple':
+      return _parseWealthsimpleEmailEnhanced(message, subject, body, sender.profile);
+    default:
+      return _parseFallbackEmail(message, subject, body);
+  }
+}
+
+// ENHANCED: CIBC Email Parser with sender-aware capabilities
+function _parseCibcEmailEnhanced(message, subject, body, accountsSheet, senderProfile) {
   const subjectLower = _lc(subject);
   const bodyLower = _lc(body);
   
@@ -764,6 +898,554 @@ function _parseCibcEmail(message, subject, body, accountsSheet) {
   return null;
 }
 
+// ENHANCED: CIBC Email Parser with sender-aware capabilities
+function _parseCibcEmailEnhanced(message, subject, body, accountsSheet, senderProfile) {
+  const subjectLower = _lc(subject);
+  const bodyLower = _lc(body);
+  
+  // Leverage CIBC's excellent merchant info capability
+  const merchantExtractionPatterns = [
+    /at\s+([A-Z0-9 \._\-&']+)\s+(?:was|on)/i,
+    /merchant[:\s]*([^\n\r,]+)/i,
+    /for\s+\$[\d,]+\.[\d]{2}\s+at\s+([^.]+)\./i,
+    /transaction\s+at\s+([^,\n\r]+)/i,
+    /purchase\s+at\s+([^,\n\r]+)/i
+  ];
+  
+  // Enhanced account detection using card number suffix
+  function detectCibcAccount(content) {
+    const cardPatterns = {
+      'CIBC Aventura': [/aventura/i, /card.*6271/i],
+      'CIBC Dividend': [/dividend/i, /card.*2866/i]
+    };
+    
+    for (const [account, patterns] of Object.entries(cardPatterns)) {
+      if (patterns.some(pattern => pattern.test(content))) {
+        return account;
+      }
+    }
+    
+    // Fallback to most negative card logic (CIBC's account detection capability)
+    return accountsSheet ? _chooseMostNegativeCibcCard(accountsSheet) || senderProfile.fallbackAccount 
+                        : senderProfile.fallbackAccount;
+  }
+  
+  // PAYMENT detection - Credit to card account
+  const paymentKeywords = ['payment', 'payment received', 'new payment to your credit card', 'payment has been applied', 'credit card payment', 'payment processed'];
+  
+  if (paymentKeywords.some(keyword => subjectLower.includes(keyword))) {
+    const amount = _extractAmount(body) || _extractAmount(subject);
+    if (!amount) return null;
+    
+    const targetAccount = detectCibcAccount(subject + body);
+    
+    return {
+      date: message.getDate(),
+      amount: amount,
+      direction: 'IN',
+      fromAccount: 'External Payment',
+      toAccount: targetAccount,
+      bank: 'CIBC Card Payment',
+      emailId: message.getId(),
+      type: 'Card Payment',
+      notes: `Payment to ${targetAccount}`,
+      senderInfo: {
+        id: 'cibc',
+        merchantInfoQuality: senderProfile.capabilities.merchantInfo,
+        accountDetectionMethod: 'card_analysis'
+      }
+    };
+  }
+  
+  // PURCHASE detection - Debit from card account (leveraging CIBC's excellent merchant info)
+  const purchaseKeywords = ['purchase', 'charge', 'authorization', 'transaction'];
+  
+  if (purchaseKeywords.some(keyword => subjectLower.includes(keyword)) || /purchase of|your card.*was charged|card ending in/i.test(bodyLower)) {
+    const amount = _extractAmount(body) || _extractAmount(subject);
+    if (!amount) return null;
+    
+    const cardAccount = detectCibcAccount(subject + body);
+    
+    // Enhanced merchant extraction using CIBC's detailed merchant info
+    let merchant = 'Unknown Merchant';
+    for (const pattern of merchantExtractionPatterns) {
+      const match = body.match(pattern);
+      if (match && match[1]) {
+        merchant = match[1].trim();
+        break;
+      }
+    }
+    
+    // Clean and enhance merchant name
+    merchant = _enhanceMerchantName(merchant, 'cibc');
+    
+    return {
+      date: message.getDate(),
+      amount: -Math.abs(amount),
+      direction: 'OUT',
+      fromAccount: cardAccount,
+      toAccount: merchant,
+      bank: `${cardAccount} Purchase`,
+      emailId: message.getId(),
+      type: 'Card Purchase',
+      notes: `Purchase at ${merchant}`,
+      senderInfo: {
+        id: 'cibc',
+        merchantInfoQuality: senderProfile.capabilities.merchantInfo,
+        accountDetectionMethod: 'card_analysis',
+        extractedMerchant: merchant
+      }
+    };
+  }
+  
+  return null;
+}
+
+// ENHANCED: PC Financial Email Parser with sender-aware capabilities
+function _parsePcFinancialEmailEnhanced(message, subject, body, senderProfile) {
+  const subjectLower = _lc(subject);
+  const bodyLower = _lc(body);
+  
+  // PC Financial has good merchant info but limited account variety
+  const merchantExtractionPatterns = [
+    /merchant[:\s]*([^\n\r]+)/i,
+    /at\s+([A-Z0-9 \._\-&']+)/i,
+    /purchase\s+at\s+([^,\n\r]+)/i
+  ];
+  
+  // Purchase notice (leveraging PC Financial's good merchant info)
+  if (subjectLower.includes('purchase notice') || /purchase amount/i.test(bodyLower)) {
+    const amount = _extractAmount(body, /purchase amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) || _extractAmount(body);
+    if (!amount) return null;
+    
+    let merchant = 'Unknown Merchant';
+    for (const pattern of merchantExtractionPatterns) {
+      const match = body.match(pattern);
+      if (match && match[1]) {
+        merchant = match[1].trim();
+        break;
+      }
+    }
+    
+    merchant = _enhanceMerchantName(merchant, 'pcfinancial');
+    
+    // Intelligent transfer detection for Wealthsimple (cross-sender awareness)
+    if (/wealthsimple/i.test(merchant)) {
+      return {
+        date: message.getDate(),
+        amount: -Math.abs(amount),
+        direction: 'OUT',
+        fromAccount: senderProfile.fallbackAccount,
+        toAccount: 'Pending Wealthsimple',
+        bank: 'PC Financial Purchase',
+        emailId: message.getId(),
+        type: 'Transfer',
+        shouldStage: true,
+        notes: `Wealthsimple deposit - awaiting confirmation`,
+        senderInfo: {
+          id: 'pcfinancial',
+          merchantInfoQuality: senderProfile.capabilities.merchantInfo,
+          crossSenderAwareness: 'wealthsimple_transfer_detected'
+        }
+      };
+    }
+    
+    return {
+      date: message.getDate(),
+      amount: -Math.abs(amount),
+      direction: 'OUT',
+      fromAccount: senderProfile.fallbackAccount,
+      toAccount: merchant,
+      bank: 'PC Financial Purchase',
+      emailId: message.getId(),
+      type: 'Purchase',
+      notes: `Purchase at ${merchant}`,
+      senderInfo: {
+        id: 'pcfinancial',
+        merchantInfoQuality: senderProfile.capabilities.merchantInfo,
+        extractedMerchant: merchant
+      }
+    };
+  }
+  
+  // E-transfer sent (leveraging PC Financial's variable recipient info)
+  if (subjectLower.includes('transfer to') || /e-transfer/i.test(bodyLower)) {
+    const amount = _extractAmount(subject) || _extractAmount(body);
+    if (!amount) return null;
+    
+    // Enhanced recipient extraction patterns
+    const recipientPatterns = [
+      /transfer to\s+(.+?)\s+has been/i,
+      /transfer to\s+(.+?)\s+for/i,
+      /recipient[:\s]*([^\n\r]+)/i,
+      /sent to[:\s]*([^\n\r]+)/i,
+      /to:\s*([^\n\r]+)/i
+    ];
+    
+    let recipient = null;
+    for (const pattern of recipientPatterns) {
+      const match = (subject + ' ' + body).match(pattern);
+      if (match && match[1]) {
+        recipient = match[1].trim();
+        break;
+      }
+    }
+    
+    if (!recipient) {
+      return {
+        date: message.getDate(),
+        amount: -Math.abs(amount),
+        direction: 'OUT',
+        fromAccount: senderProfile.fallbackAccount,
+        toAccount: 'Pending - Unknown Recipient',
+        bank: 'PC Financial e-Transfer',
+        emailId: message.getId(),
+        type: 'External Transfer',
+        shouldStage: true,
+        notes: 'Unable to determine recipient - requires manual review',
+        senderInfo: {
+          id: 'pcfinancial',
+          recipientInfoQuality: 'failed_extraction',
+          requiresManualReview: true
+        }
+      };
+    }
+    
+    const normalizedRecipient = _normalizeAccountName(recipient);
+    const isInternal = _isInternalAccount(normalizedRecipient);
+    
+    return {
+      date: message.getDate(),
+      amount: -Math.abs(amount),
+      direction: 'OUT',
+      fromAccount: senderProfile.fallbackAccount,
+      toAccount: isInternal ? normalizedRecipient : `External to ${recipient}`,
+      bank: 'PC Financial e-Transfer',
+      emailId: message.getId(),
+      type: isInternal ? 'Internal Transfer' : 'External Transfer',
+      shouldStage: isInternal,
+      notes: isInternal ? `Internal transfer to ${normalizedRecipient}` : `External transfer to ${recipient}`,
+      senderInfo: {
+        id: 'pcfinancial',
+        recipientInfoQuality: senderProfile.capabilities.recipientInfo,
+        isInternalTransfer: isInternal,
+        extractedRecipient: recipient
+      }
+    };
+  }
+  
+  return null;
+}
+
+// ENHANCED: Interac Email Parser with sender-aware capabilities
+function _parseInteracEmailEnhanced(message, subject, body, senderProfile) {
+  // Interac has excellent recipient info but no merchant info
+  const amount = _extractAmount(body, /sent you \$([0-9,]+\.[0-9]{2})/i) ||
+                 _extractAmount(body, /amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) ||
+                 _extractAmount(subject, /\$([0-9,]+\.[0-9]{2})/i);
+  
+  if (!amount) return null;
+  
+  // Enhanced sender extraction using Interac's excellent recipient capabilities
+  const senderPatterns = [
+    /([A-Za-z0-9 .'-]+)\s+sent you \$/i,
+    /From[:\s]*([A-Za-z0-9 .'-]+)/i,
+    /sender[:\s]*([A-Za-z0-9 .'-]+)/i,
+    /from\s+([A-Za-z0-9 .'-]+)/i
+  ];
+  
+  let sender = 'Unknown Sender';
+  for (const pattern of senderPatterns) {
+    const match = (subject + ' ' + body).match(pattern);
+    if (match && match[1]) {
+      sender = match[1].trim();
+      break;
+    }
+  }
+  
+  // Intelligent destination account detection
+  let destinationAccount = senderProfile.fallbackAccount;
+  
+  // Check if this might be going to a specific account based on sender
+  if (/wealthsimple/i.test(sender)) {
+    destinationAccount = 'Wealthsimple Cash';
+  } else if (/dividend|investment/i.test(sender)) {
+    destinationAccount = 'CIBC Dividend';
+  }
+  
+  return {
+    date: message.getDate(),
+    amount: amount,
+    direction: 'IN',
+    fromAccount: `e-Transfer from ${sender}`,
+    toAccount: destinationAccount,
+    bank: 'Interac Deposit',
+    emailId: message.getId(),
+    type: 'Interac',
+    notes: `Received from ${sender}`,
+    senderInfo: {
+      id: 'interac',
+      recipientInfoQuality: senderProfile.capabilities.recipientInfo,
+      extractedSender: sender,
+      destinationLogic: 'sender_based_routing'
+    }
+  };
+}
+
+// ENHANCED: Wealthsimple Email Parser with sender-aware capabilities
+function _parseWealthsimpleEmailEnhanced(message, subject, body, senderProfile) {
+// ENHANCED: Wealthsimple Email Parser with sender-aware capabilities
+function _parseWealthsimpleEmailEnhanced(message, subject, body, senderProfile) {
+  const subjectLower = _lc(subject);
+  const bodyLower = _lc(body);
+  
+  // Enhanced account type detection using Wealthsimple's excellent account info
+  function detectWealthsimpleAccount(content, defaultAccount = senderProfile.fallbackAccount) {
+    const accountPatterns = {
+      'Wealthsimple RRSP': [/rrsp/i, /retirement/i, /retirey mcretireface/i],
+      'Wealthsimple TFSA': [/tfsa/i, /tax.*free/i],
+      'Wealthsimple Cash': [/cash/i, /spending/i, /save/i],
+      'Wealthsimple Trade': [/trade/i, /trading/i, /investment/i]
+    };
+    
+    for (const [account, patterns] of Object.entries(accountPatterns)) {
+      if (patterns.some(pattern => pattern.test(content))) {
+        return account;
+      }
+    }
+    
+    return defaultAccount;
+  }
+  
+  // 1. DEPOSIT/CONTRIBUTION CONFIRMATION (leveraging excellent account info)
+  if (subjectLower.includes('deposit') || /added money|deposit.*confirmed|contribution/i.test(bodyLower)) {
+    const amount = _extractAmount(body, /amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) || _extractAmount(subject) || _extractAmount(body);
+                   
+    if (!amount) return null;
+    
+    // Enhanced account detection using Wealthsimple's capabilities
+    const accountInfo = _extractText(body, /to[:\s]*([\s\S]*?)\s*sometimes/i) || 
+                        _extractText(body, /your\s+([A-Za-z]+)\s+account/i) ||
+                        _extractText(body, /account type[:\s]*([^\n\r]+)/i) ||
+                        '';
+    
+    const targetAccount = detectWealthsimpleAccount(accountInfo + subject + body);
+    
+    // Parse any holdings data (leveraging excellent holdings info capability)
+    const holdingsData = _parseWealthsimpleHoldingsFromEmail(body);
+    
+    const transaction = {
+      date: message.getDate(),
+      amount: amount,
+      direction: 'IN',
+      fromAccount: 'PC Financial',
+      toAccount: targetAccount,
+      bank: 'Wealthsimple Deposit',
+      emailId: message.getId(),
+      type: 'Investment Contribution',
+      shouldPair: true,
+      notes: `Contribution to ${targetAccount}`,
+      senderInfo: {
+        id: 'wealthsimple',
+        accountInfoQuality: senderProfile.capabilities.accountInfo,
+        holdingsInfoQuality: senderProfile.capabilities.holdingsInfo,
+        detectedAccount: targetAccount,
+        holdingsFound: holdingsData.length
+      }
+    };
+    
+    if (holdingsData.length > 0) {
+      transaction.holdings = holdingsData;
+    }
+    
+    return transaction;
+  }
+  
+  // 2. TRADE EXECUTION (leveraging ticker symbols and excellent holdings info)
+  if (subjectLower.includes('order has been filled') || /shares of|purchased|bought/i.test(bodyLower)) {
+    const tradeMatch = body.match(/(\d+[\d.,]*)\s+shares\s+of\s+([A-Z\.\-]+)[\s\S]+?total cost[:\s]*\$([0-9,]+\.[0-9]+)/i);
+    
+    if (!tradeMatch) return null;
+    
+    const shares = parseFloat(tradeMatch[1].replace(/,/g, ''));
+    const ticker = tradeMatch[2].trim();
+    const cost = parseFloat(tradeMatch[3].replace(/,/g, ''));
+    
+    const accountInfo = _extractText(body, /account[:\s]*([\s\S]*?)\s*time:/i) || 
+                        _extractText(body, /your\s+([A-Za-z]+)\s+account/i) ||
+                        '';
+    
+    const targetAccount = detectWealthsimpleAccount(accountInfo + subject + body);
+    
+    // Enhanced trade processing with holdings integration
+    setTimeout(() => _updateHoldingsFromTrade(targetAccount, ticker, shares, cost), 1000);
+    
+    return {
+      date: message.getDate(),
+      amount: -cost,
+      direction: 'TRADE',
+      fromAccount: targetAccount,
+      toAccount: targetAccount,
+      bank: 'Wealthsimple Trade',
+      emailId: message.getId(),
+      type: 'Investment Purchase',
+      notes: `Bought ${shares} shares of ${ticker}`,
+      tradeInfo: { ticker, shares, cost },
+      senderInfo: {
+        id: 'wealthsimple',
+        accountInfoQuality: senderProfile.capabilities.accountInfo,
+        holdingsInfoQuality: senderProfile.capabilities.holdingsInfo,
+        tickerSymbol: ticker,
+        detectedAccount: targetAccount,
+        autoHoldingsUpdate: true
+      }
+    };
+  }
+  
+  // 3. PORTFOLIO SUMMARY/STATEMENT EMAILS (leveraging excellent holdings info)
+  if (subjectLower.includes('portfolio') || subjectLower.includes('statement') || subjectLower.includes('summary')) {
+    const holdingsData = _parseWealthsimpleHoldingsFromEmail(body);
+    
+    if (holdingsData.length > 0) {
+      // Enhanced portfolio processing
+      setTimeout(() => _updateAllHoldingsFromEmail(holdingsData), 1000);
+      
+      return {
+        date: message.getDate(),
+        amount: 0,
+        direction: 'INFO',
+        fromAccount: 'Wealthsimple',
+        toAccount: 'Portfolio Update',
+        bank: 'Wealthsimple Portfolio',
+        emailId: message.getId(),
+        type: 'Portfolio Update',
+        notes: `Portfolio summary with ${holdingsData.length} holdings`,
+        holdings: holdingsData,
+        senderInfo: {
+          id: 'wealthsimple',
+          holdingsInfoQuality: senderProfile.capabilities.holdingsInfo,
+          holdingsCount: holdingsData.length,
+          portfolioUpdateType: 'statement'
+        }
+      };
+    }
+  }
+  
+  // 4. DIVIDEND/DISTRIBUTION (investment-specific handling)
+  if (subjectLower.includes('dividend') || subjectLower.includes('distribution')) {
+    const dividendMatch = body.match(/(?:dividend|distribution).*?\$([0-9,]+\.[0-9]+)/i);
+    if (dividendMatch) {
+      const amount = parseFloat(dividendMatch[1].replace(/,/g, ''));
+      const targetAccount = detectWealthsimpleAccount(subject + body);
+      
+      return {
+        date: message.getDate(),
+        amount: amount,
+        direction: 'IN',
+        fromAccount: 'Investment Dividends',
+        toAccount: targetAccount,
+        bank: 'Wealthsimple Dividend',
+        emailId: message.getId(),
+        type: 'Dividend/Distribution',
+        notes: `Dividend/distribution payment`,
+        senderInfo: {
+          id: 'wealthsimple',
+          accountInfoQuality: senderProfile.capabilities.accountInfo,
+          detectedAccount: targetAccount,
+          paymentType: 'dividend'
+        }
+      };
+    }
+  }
+  
+  return null;
+}
+
+// Merchant name enhancement based on sender capabilities
+function _enhanceMerchantName(rawMerchant, senderId) {
+  if (!rawMerchant || rawMerchant === 'Unknown Merchant') return rawMerchant;
+  
+  let cleaned = rawMerchant
+    .replace(/[0-9]{4,}/g, '') // Remove transaction IDs
+    .replace(/\b(pos|terminal|txn|ref)\b/gi, '') // Remove POS terms
+    .replace(/[^a-zA-Z0-9\s&'-]/g, ' ') // Clean special chars
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  // Sender-specific enhancements
+  switch (senderId) {
+    case 'cibc':
+      // CIBC provides excellent merchant info, minimal cleaning needed
+      cleaned = cleaned.replace(/\b(purchase|transaction)\b/gi, '').trim();
+      break;
+      
+    case 'pcfinancial':
+      // PC Financial provides good merchant info
+      cleaned = cleaned.replace(/\b(merchant|at)\b/gi, '').trim();
+      break;
+      
+    case 'wealthsimple':
+      // For ticker symbols, keep them as-is
+      if (/^[A-Z]{1,5}(\.TO)?$/.test(cleaned)) {
+        return cleaned.toUpperCase();
+      }
+      break;
+  }
+  
+  return cleaned || rawMerchant;
+}
+
+// Fallback parsing for unknown senders
+function _parseFallbackEmail(message, subject, body) {
+  _logWarning('Using fallback email parsing for unknown sender', {
+    from: message.getFrom(),
+    subject: subject.substring(0, 50)
+  });
+  
+  // Basic amount extraction
+  const amount = _extractAmount(body) || _extractAmount(subject);
+  if (!amount) return null;
+  
+  return {
+    date: message.getDate(),
+    amount: amount > 0 ? -Math.abs(amount) : amount, // Assume expense if positive
+    direction: amount > 0 ? 'OUT' : 'IN',
+    fromAccount: 'Unknown Source',
+    toAccount: 'Unknown Destination',
+    bank: 'Unknown Bank',
+    emailId: message.getId(),
+    type: 'Unknown Transaction',
+    notes: `Fallback parsing - manual review needed`,
+    shouldStage: true, // Always stage unknown transactions
+    senderInfo: {
+      id: 'unknown',
+      requiresManualReview: true,
+      fallbackParsing: true
+    }
+  };
+}
+
+// Backward compatibility wrapper
+function _parseCibcEmail(message, subject, body, accountsSheet) {
+  const sender = _identifyEmailSender(message.getFrom(), subject, body);
+  return _parseCibcEmailEnhanced(message, subject, body, accountsSheet, sender.profile || SENDER_PROFILES.cibc);
+}
+
+function _parsePcFinancialEmail(message, subject, body) {
+  const sender = _identifyEmailSender(message.getFrom(), subject, body);
+  return _parsePcFinancialEmailEnhanced(message, subject, body, sender.profile || SENDER_PROFILES.pcfinancial);
+}
+
+function _parseInteracEmail(message, subject, body) {
+  const sender = _identifyEmailSender(message.getFrom(), subject, body);
+  return _parseInteracEmailEnhanced(message, subject, body, sender.profile || SENDER_PROFILES.interac);
+}
+
+function _parseWealthsimpleEmail(message, subject, body) {
+  const sender = _identifyEmailSender(message.getFrom(), subject, body);
+  return _parseWealthsimpleEmailEnhanced(message, subject, body, sender.profile || SENDER_PROFILES.wealthsimple);
+}
+
 function _chooseMostNegativeCibcCard(accountsSheet) {
   if (!accountsSheet || accountsSheet.getLastRow() < 2) return null;
   
@@ -783,196 +1465,6 @@ function _chooseMostNegativeCibcCard(accountsSheet) {
   
   return mostNegativeCard;
 }
-
-// IMPROVED: PC Financial Email Parser with better recipient handling
-function _parsePcFinancialEmail(message, subject, body) {
-  const subjectLower = _lc(subject);
-  const bodyLower = _lc(body);
-  
-  // Purchase notice
-  if (subjectLower.includes('purchase notice') || /purchase amount/i.test(bodyLower)) {
-    const amount = _extractAmount(body, /purchase amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) || _extractAmount(body);
-    if (!amount) return null;
-    
-    const merchant = _extractText(body, /merchant[:\s]*([^\n\r]+)/i) ||
-                     _extractText(body, /at\s+([A-Z0-9 \._\-&']+)/i) ||
-                     'Merchant';
-    
-    // Check if this is a Wealthsimple deposit (should be staged)
-    if (/wealthsimple/i.test(merchant)) {
-      return {
-        date: message.getDate(), amount: -Math.abs(amount), direction: 'OUT', fromAccount: 'PC Financial',
-        toAccount: 'Pending Wealthsimple', bank: 'PC Financial Purchase', emailId: message.getId(),
-        type: 'Transfer', shouldStage: true, notes: `Wealthsimple deposit - awaiting confirmation`
-      };
-    }
-    
-    return {
-      date: message.getDate(), amount: -Math.abs(amount), direction: 'OUT', fromAccount: 'PC Financial',
-      toAccount: merchant, bank: 'PC Financial Purchase', emailId: message.getId(),
-      type: 'Purchase', notes: `Purchase at ${merchant}`
-    };
-  }
-  
-  // E-transfer sent - IMPROVED recipient detection
-  if (subjectLower.includes('transfer to') || /e-transfer/i.test(bodyLower)) {
-    const amount = _extractAmount(subject) || _extractAmount(body);
-    if (!amount) return null;
-    
-    const recipient = _extractText(subject, /transfer to\s+(.+?)\s+has been/i) ||
-                     _extractText(body, /transfer to\s+(.+?)\s+has been/i) ||
-                     _extractText(body, /recipient[:\s]*([^\n\r]+)/i) ||
-                     _extractText(body, /sent to[:\s]*([^\n\r]+)/i);
-    
-    if (!recipient) {
-      return {
-        date: message.getDate(), amount: -Math.abs(amount), direction: 'OUT', fromAccount: 'PC Financial',
-        toAccount: 'Pending - Unknown Recipient', bank: 'PC Financial e-Transfer', emailId: message.getId(),
-        type: 'External Transfer', shouldStage: true, notes: 'Unable to determine recipient - requires manual review'
-      };
-    }
-    
-    const normalizedRecipient = _normalizeAccountName(recipient);
-    const isInternal = _isInternalAccount(normalizedRecipient);
-    
-    return {
-      date: message.getDate(), amount: -Math.abs(amount), direction: 'OUT', fromAccount: 'PC Financial',
-      toAccount: isInternal ? normalizedRecipient : `External to ${recipient}`, bank: 'PC Financial e-Transfer',
-      emailId: message.getId(), type: isInternal ? 'Internal Transfer' : 'External Transfer',
-      shouldStage: isInternal, notes: isInternal ? `Internal transfer to ${normalizedRecipient}` : `External transfer to ${recipient}`
-    };
-  }
-  
-  return null;
-}
-
-// IMPROVED: Interac Email Parser with better sender extraction
-function _parseInteracEmail(message, subject, body) {
-  const amount = _extractAmount(body, /sent you \$([0-9,]+\.[0-9]{2})/i) ||
-                 _extractAmount(body, /amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) ||
-                 _extractAmount(subject, /\$([0-9,]+\.[0-9]{2})/i);
-  
-  if (!amount) return null;
-  
-  const sender = _extractText(body, /([A-Za-z0-9 .'-]+) sent you \$/i) || 
-                _extractText(body, /From[:\s]*([A-Za-z0-9 .'-]+)/i) ||
-                _extractText(subject, /from ([A-Za-z0-9 .'-]+)/i) ||
-                'Unknown Sender';
-  
-  return {
-    date: message.getDate(), amount: amount, direction: 'IN', fromAccount: `e-Transfer from ${sender}`,
-    toAccount: 'PC Financial', bank: 'Interac Deposit', emailId: message.getId(),
-    type: 'Interac', notes: `Received from ${sender}`
-  };
-}
-
-// ENHANCED: Wealthsimple Email Parser with holdings integration
-function _parseWealthsimpleEmail(message, subject, body) {
-  const subjectLower = _lc(subject);
-  const bodyLower = _lc(body);
-  
-  // 1. DEPOSIT/CONTRIBUTION CONFIRMATION
-  if (subjectLower.includes('deposit') || /added money|deposit.*confirmed|contribution/i.test(bodyLower)) {
-    const amount = _extractAmount(body, /amount[:\s]*\$([0-9,]+\.[0-9]{2})/i) || _extractAmount(subject) || _extractAmount(body);
-                   
-    if (!amount) return null;
-    
-    const accountInfo = _extractText(body, /to[:\s]*([\s\S]*?)\s*sometimes/i) || 
-                        _extractText(body, /your\s+([A-Za-z]+)\s+account/i) ||
-                        _extractText(body, /account type[:\s]*([^\n\r]+)/i) ||
-                        '';
-    
-    let targetAccount = 'Wealthsimple Cash'; // Default
-    if (/rrsp/i.test(accountInfo)) {
-      targetAccount = 'Wealthsimple RRSP';
-    } else if (/crypto/i.test(accountInfo)) {
-      targetAccount = 'Wealthsimple Crypto';
-    } else if (/tfsa/i.test(accountInfo)) {
-      targetAccount = 'Wealthsimple TFSA';
-    }
-    
-    // Parse any holdings data included in contribution emails
-    const holdingsData = _parseWealthsimpleHoldingsFromEmail(body);
-    
-    const transaction = {
-      date: message.getDate(), amount: amount, direction: 'IN', fromAccount: 'PC Financial',
-      toAccount: targetAccount, bank: 'Wealthsimple Deposit', emailId: message.getId(),
-      type: 'Investment Contribution', shouldPair: true, notes: `Contribution to ${targetAccount}`
-    };
-    
-    if (holdingsData.length > 0) {
-      transaction.holdings = holdingsData;
-    }
-    
-    return transaction;
-  }
-  
-  // 2. TRADE EXECUTION
-  if (subjectLower.includes('order has been filled') || /shares of|purchased|bought/i.test(bodyLower)) {
-    const tradeMatch = body.match(/(\d+[\d.,]*)\s+shares\s+of\s+([A-Z\.\-]+)[\s\S]+?total cost[:\s]*\$([0-9,]+\.[0-9]+)/i);
-    
-    if (!tradeMatch) return null;
-    
-    const shares = parseFloat(tradeMatch[1].replace(/,/g, ''));
-    const ticker = tradeMatch[2].trim();
-    const cost = parseFloat(tradeMatch[3].replace(/,/g, ''));
-    
-    const accountInfo = _extractText(body, /account[:\s]*([\s\S]*?)\s*time:/i) || 
-                        _extractText(body, /your\s+([A-Za-z]+)\s+account/i) ||
-                        '';
-    
-    let targetAccount = 'Wealthsimple Cash'; // Default
-    if (/rrsp/i.test(accountInfo)) {
-      targetAccount = 'Wealthsimple RRSP';
-    } else if (/crypto/i.test(accountInfo)) {
-      targetAccount = 'Wealthsimple Crypto';
-    } else if (/tfsa/i.test(accountInfo)) {
-      targetAccount = 'Wealthsimple TFSA';
-    }
-    
-    // Update holdings immediately
-    setTimeout(() => _updateHoldingsFromTrade(targetAccount, ticker, shares, cost), 1000);
-    
-    return {
-      date: message.getDate(), amount: -cost, direction: 'TRADE', fromAccount: targetAccount,
-      toAccount: targetAccount, bank: 'Wealthsimple Trade', emailId: message.getId(),
-      type: 'Investment Purchase', notes: `Bought ${shares} shares of ${ticker}`, 
-      tradeInfo: { ticker, shares, cost }
-    };
-  }
-  
-  // 3. PORTFOLIO SUMMARY/STATEMENT EMAILS
-  if (subjectLower.includes('portfolio') || subjectLower.includes('statement') || subjectLower.includes('summary')) {
-    const holdingsData = _parseWealthsimpleHoldingsFromEmail(body);
-    
-    if (holdingsData.length > 0) {
-      // Process holdings update
-      setTimeout(() => _updateAllHoldingsFromEmail(holdingsData), 1000);
-      
-      return {
-        date: message.getDate(), amount: 0, direction: 'INFO', fromAccount: 'Wealthsimple',
-        toAccount: 'Portfolio Update', bank: 'Wealthsimple Portfolio', emailId: message.getId(),
-        type: 'Portfolio Update', notes: `Portfolio summary with ${holdingsData.length} holdings`,
-        holdings: holdingsData
-      };
-    }
-  }
-  
-  // 4. DIVIDEND/DISTRIBUTION
-  if (subjectLower.includes('dividend') || subjectLower.includes('distribution')) {
-    const dividendMatch = body.match(/(?:dividend|distribution).*?\$([0-9,]+\.[0-9]+)/i);
-    if (dividendMatch) {
-      const amount = parseFloat(dividendMatch[1].replace(/,/g, ''));
-      
-      return {
-        date: message.getDate(), amount: amount, direction: 'IN', fromAccount: 'Investment Dividends',
-        toAccount: 'Wealthsimple Cash', bank: 'Wealthsimple Dividend', emailId: message.getId(),
-        type: 'Dividend/Distribution', notes: `Dividend/distribution payment`
-      };
-    }
-  }
-  
-  return null;
 }
 
 // Parse holdings data from Wealthsimple emails
@@ -1300,18 +1792,17 @@ function _processNewEmails() {
           
           let transaction = null;
           
-          // Parse based on sender
-          if (from.includes('cibc')) {
-            transaction = _parseCibcEmail(message, subject, body, accountsSheet);
-          } else if (from.includes('pcfinancial')) {
-            transaction = _parsePcFinancialEmail(message, subject, body);
-          } else if (from.includes('payments.interac')) {
-            transaction = _parseInteracEmail(message, subject, body);
-          } else if (from.includes('wealthsimple')) {
-            transaction = _parseWealthsimpleEmail(message, subject, body);
-          }
+          // Use enhanced sender-aware parsing
+          transaction = _parseEmailWithSenderContext(message, subject, body, accountsSheet);
           
-          if (!transaction) return;
+          if (!transaction) {
+            _logInfo(`No transaction extracted from email`, {
+              emailId: message.getId(),
+              from: message.getFrom(),
+              subject: subject.substring(0, 50)
+            });
+            return;
+          }
           
           // Normalize account names
           transaction.fromAccount = _normalizeAccountName(transaction.fromAccount || '');
