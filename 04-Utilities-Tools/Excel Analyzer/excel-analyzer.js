@@ -46,14 +46,21 @@ class ExcelAnalyzer {
   }
 
   /**
-   * Analyze the finance automation results
+   * Analyze the finance automation results - UPDATED FOR STREAMLINED SYSTEM
    */
   analyzeFinanceData() {
     const analysis = {
       summary: {},
       sheets: {},
-      insights: []
+      insights: [],
+      streamlinedSystemDetected: false
     };
+
+    // Check if this is the new streamlined system
+    if (this.sheets['System_Analysis'] || this.sheets['Excel_Analyzer_Output']) {
+      analysis.streamlinedSystemDetected = true;
+      console.log('🎯 Detected new streamlined analysis system');
+    }
 
     // Analyze each sheet
     for (const [sheetName, data] of Object.entries(this.sheets)) {
@@ -73,19 +80,200 @@ class ExcelAnalyzer {
         sheetAnalysis.transactionAnalysis = this.analyzeTransactions(data);
       } else if (sheetName.toLowerCase().includes('categor')) {
         sheetAnalysis.categoryAnalysis = this.analyzeCategories(data);
+      } else if (sheetName === 'System_Analysis') {
+        // NEW: Analyze the unified system analysis sheet
+        sheetAnalysis.systemAnalysis = this.analyzeSystemEvents(data);
+      } else if (sheetName === 'Excel_Analyzer_Output') {
+        // NEW: Analyze the clean Excel output
+        sheetAnalysis.excelOutputAnalysis = this.analyzeExcelOutput(data);
       } else if (sheetName.toLowerCase().includes('learning') || sheetName.toLowerCase().includes('ai')) {
+        // LEGACY: Keep for backward compatibility but mark as legacy
         sheetAnalysis.learningAnalysis = this.analyzeLearningData(data);
+        if (analysis.streamlinedSystemDetected) {
+          sheetAnalysis.learningAnalysis.isLegacy = true;
+        }
       } else if (sheetName.toLowerCase().includes('account')) {
         sheetAnalysis.accountAnalysis = this.analyzeAccounts(data);
+      } else if (sheetName.toLowerCase().includes('audit')) {
+        // LEGACY: Mark as deprecated
+        sheetAnalysis.legacyAuditLog = this.analyzeLegacyAuditLog(data);
+      } else if (sheetName.toLowerCase().includes('failed')) {
+        // LEGACY: Mark as deprecated
+        sheetAnalysis.legacyFailedParsing = this.analyzeLegacyFailedParsing(data);
       }
 
       analysis.sheets[sheetName] = sheetAnalysis;
     }
 
-    // Generate overall insights
-    analysis.insights = this.generateInsights(analysis.sheets);
-    
+    // Generate insights based on analysis
+    analysis.insights = this.generateStreamlinedInsights(analysis.sheets, analysis.streamlinedSystemDetected);
+
     return analysis;
+  }
+
+  /**
+   * NEW: Analyze the unified System_Analysis sheet
+   */
+  analyzeSystemEvents(data) {
+    if (!data || data.length < 2) return null;
+
+    const headers = data[0] || [];
+    const rows = data.slice(1);
+    
+    const analysis = {
+      totalEvents: rows.length,
+      eventTypes: {},
+      systemHealth: 'Unknown',
+      criticalIssues: [],
+      actionItems: []
+    };
+
+    // Find relevant columns
+    const timestampCol = headers.findIndex(h => h && h.toLowerCase().includes('timestamp'));
+    const typeCol = headers.findIndex(h => h && (h.toLowerCase().includes('type') || h.toLowerCase().includes('level')));
+    const messageCol = headers.findIndex(h => h && h.toLowerCase().includes('message'));
+    const statusCol = headers.findIndex(h => h && h.toLowerCase().includes('status'));
+
+    rows.forEach(row => {
+      // Count event types
+      const eventType = row[typeCol] || 'UNKNOWN';
+      analysis.eventTypes[eventType] = (analysis.eventTypes[eventType] || 0) + 1;
+
+      // Check for critical issues
+      if (eventType === 'ERROR' || eventType === 'CRITICAL') {
+        analysis.criticalIssues.push({
+          message: row[messageCol] || 'Unknown error',
+          timestamp: row[timestampCol] || 'Unknown time'
+        });
+      }
+
+      // Check for action items
+      const message = row[messageCol] || '';
+      if (message.toLowerCase().includes('action required') || 
+          message.toLowerCase().includes('needs attention') ||
+          message.toLowerCase().includes('manual review')) {
+        analysis.actionItems.push({
+          action: 'MANUAL_REVIEW',
+          message: message,
+          timestamp: row[timestampCol] || 'Unknown time'
+        });
+      }
+    });
+
+    // Determine system health
+    const errorCount = analysis.eventTypes['ERROR'] || 0;
+    const criticalCount = analysis.eventTypes['CRITICAL'] || 0;
+    const warningCount = analysis.eventTypes['WARNING'] || 0;
+
+    if (criticalCount > 0 || errorCount > 5) {
+      analysis.systemHealth = 'CRITICAL';
+    } else if (errorCount > 0 || warningCount > 10) {
+      analysis.systemHealth = 'WARNING';
+    } else {
+      analysis.systemHealth = 'HEALTHY';
+    }
+
+    return analysis;
+  }
+
+  /**
+   * NEW: Analyze the Excel_Analyzer_Output sheet
+   */
+  analyzeExcelOutput(data) {
+    if (!data || data.length < 2) return null;
+
+    const headers = data[0] || [];
+    const rows = data.slice(1);
+    
+    const analysis = {
+      totalRows: rows.length,
+      metrics: {},
+      overallStatus: 'Unknown',
+      actionItems: []
+    };
+
+    // Find metric and value columns
+    const metricCol = headers.findIndex(h => h && h.toLowerCase().includes('metric'));
+    const valueCol = headers.findIndex(h => h && h.toLowerCase().includes('value'));
+    const statusCol = headers.findIndex(h => h && h.toLowerCase().includes('status'));
+
+    rows.forEach(row => {
+      const metric = row[metricCol] || 'Unknown';
+      const value = row[valueCol] || 'N/A';
+      const status = row[statusCol] || 'Unknown';
+
+      analysis.metrics[metric] = {
+        value: value,
+        status: status
+      };
+
+      // Check for action items
+      if (status === 'Poor' || status === 'Critical' || status === 'Failed') {
+        analysis.actionItems.push({
+          metric: metric,
+          value: value,
+          status: status,
+          priority: status === 'Critical' ? 'HIGH' : 'MEDIUM'
+        });
+      }
+    });
+
+    // Determine overall status
+    const statusCounts = Object.values(analysis.metrics).reduce((acc, metric) => {
+      acc[metric.status] = (acc[metric.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    if (statusCounts['Critical'] > 0 || statusCounts['Failed'] > 0) {
+      analysis.overallStatus = 'CRITICAL';
+    } else if (statusCounts['Poor'] > 0 || statusCounts['Warning'] > 0) {
+      analysis.overallStatus = 'WARNING';
+    } else if (statusCounts['Good'] > 0 || statusCounts['Excellent'] > 0) {
+      analysis.overallStatus = 'HEALTHY';
+    }
+
+    return analysis;
+  }
+
+  /**
+   * LEGACY: Analyze deprecated audit log sheets
+   */
+  analyzeLegacyAuditLog(data) {
+    return {
+      totalEntries: data.length - 1,
+      status: 'DEPRECATED',
+      recommendation: 'Migrate to System_Analysis sheet for unified logging'
+    };
+  }
+
+  /**
+   * LEGACY: Analyze deprecated failed parsing sheets
+   */
+  analyzeLegacyFailedParsing(data) {
+    return {
+      totalFailures: data.length - 1,
+      status: 'DEPRECATED',
+      recommendation: 'Use System_Analysis sheet for error tracking'
+    };
+  }
+
+  /**
+   * Find the last updated date in the data
+   */
+  findLastUpdatedDate(data) {
+    try {
+      // Look for date patterns in the data
+      for (let row of data) {
+        for (let cell of row) {
+          if (typeof cell === 'string' && /\d{1,2}\/\d{1,2}\/\d{4}/.test(cell)) {
+            return cell;
+          }
+        }
+      }
+      return null;
+    } catch (error) {
+      return null;
+    }
   }
 
   /**
@@ -99,172 +287,156 @@ class ExcelAnalyzer {
     
     const analysis = {
       totalTransactions: transactions.length,
-      dateRange: this.getDateRange(transactions, headers),
-      categories: this.getUniqueValues(transactions, headers, 'category'),
-      merchants: this.getUniqueValues(transactions, headers, 'merchant'),
-      amounts: this.getAmountStatistics(transactions, headers),
-      recentTransactions: transactions.slice(-10) // Last 10 transactions
+      dateRange: null,
+      categories: [],
+      accounts: []
     };
+
+    // Find date column
+    const dateColumnIndex = headers.findIndex(header => 
+      header && header.toLowerCase().includes('date')
+    );
+
+    if (dateColumnIndex !== -1) {
+      const dates = transactions
+        .map(row => row[dateColumnIndex])
+        .filter(date => date)
+        .sort();
+      
+      if (dates.length > 0) {
+        analysis.dateRange = {
+          start: dates[0],
+          end: dates[dates.length - 1],
+          range: `${dates[0]} to ${dates[dates.length - 1]}`
+        };
+      }
+    }
+
+    // Find category column
+    const categoryColumnIndex = headers.findIndex(header => 
+      header && header.toLowerCase().includes('category')
+    );
+
+    if (categoryColumnIndex !== -1) {
+      analysis.categories = [...new Set(
+        transactions
+          .map(row => row[categoryColumnIndex])
+          .filter(cat => cat && cat.trim() !== '')
+      )];
+    }
 
     return analysis;
   }
 
   /**
-   * Analyze category learning data
-   */
-  analyzeLearningData(data) {
-    if (data.length < 2) return null;
-
-    const headers = data[0];
-    const learningEntries = data.slice(1);
-    
-    return {
-      totalPatterns: learningEntries.length,
-      learningTypes: this.getUniqueValues(learningEntries, headers, 'type'),
-      confidenceLevels: this.getConfidenceStats(learningEntries, headers),
-      recentLearning: learningEntries.slice(-5)
-    };
-  }
-
-  /**
-   * Analyze categories
+   * Analyze category data
    */
   analyzeCategories(data) {
     if (data.length < 2) return null;
 
-    const headers = data[0];
-    const categories = data.slice(1);
-    
     return {
-      totalCategories: categories.length,
-      categoryList: categories.map(row => row[0]).filter(Boolean),
-      mappings: categories.filter(row => row.length > 1)
+      totalCategories: data.length - 1,
+      headers: data[0] || []
     };
   }
 
   /**
-   * Analyze accounts
+   * Analyze learning data - Updated for legacy detection
+   */
+  analyzeLearningData(data) {
+    if (data.length < 2) return null;
+
+    const analysis = {
+      totalPatterns: data.length - 1,
+      headers: data[0] || [],
+      confidenceLevels: {}
+    };
+
+    // Check if this appears to be legacy learning data
+    const headers = data[0] || [];
+    if (headers.some(h => h && (h.includes('confidence') || h.includes('accuracy')))) {
+      const confidenceCol = headers.findIndex(h => h && h.toLowerCase().includes('confidence'));
+      if (confidenceCol !== -1) {
+        const confidenceValues = data.slice(1)
+          .map(row => parseFloat(row[confidenceCol]))
+          .filter(val => !isNaN(val));
+        
+        analysis.confidenceLevels = {
+          high: confidenceValues.filter(val => val > 0.8).length,
+          medium: confidenceValues.filter(val => val > 0.5 && val <= 0.8).length,
+          low: confidenceValues.filter(val => val <= 0.5).length
+        };
+      }
+    }
+
+    return analysis;
+  }
+
+  /**
+   * Analyze account data
    */
   analyzeAccounts(data) {
     if (data.length < 2) return null;
 
-    const headers = data[0];
-    const accounts = data.slice(1);
-    
     return {
-      totalAccounts: accounts.length,
-      accountTypes: this.getUniqueValues(accounts, headers, 'type'),
-      balances: this.getAmountStatistics(accounts, headers, 'balance')
+      totalAccounts: data.length - 1,
+      headers: data[0] || []
     };
   }
 
   /**
-   * Helper methods
+   * Generate insights with streamlined system awareness
    */
-  findLastUpdatedDate(data) {
-    // Look for date columns and find the most recent date
-    const dateRegex = /\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4}/;
-    let latestDate = null;
-
-    data.forEach(row => {
-      row.forEach(cell => {
-        if (typeof cell === 'string' && dateRegex.test(cell)) {
-          const date = new Date(cell);
-          if (!isNaN(date.getTime()) && (!latestDate || date > latestDate)) {
-            latestDate = date;
-          }
-        }
-      });
-    });
-
-    return latestDate ? latestDate.toISOString().split('T')[0] : null;
-  }
-
-  getDateRange(data, headers) {
-    const dateCol = this.findColumnIndex(headers, ['date', 'timestamp', 'created']);
-    if (dateCol === -1) return null;
-
-    const dates = data.map(row => new Date(row[dateCol])).filter(d => !isNaN(d.getTime()));
-    if (dates.length === 0) return null;
-
-    return {
-      earliest: Math.min(...dates),
-      latest: Math.max(...dates),
-      range: `${new Date(Math.min(...dates)).toLocaleDateString()} - ${new Date(Math.max(...dates)).toLocaleDateString()}`
-    };
-  }
-
-  getUniqueValues(data, headers, columnName) {
-    const colIndex = this.findColumnIndex(headers, [columnName]);
-    if (colIndex === -1) return [];
-
-    const values = data.map(row => row[colIndex]).filter(Boolean);
-    return [...new Set(values)];
-  }
-
-  getAmountStatistics(data, headers, columnName = 'amount') {
-    const colIndex = this.findColumnIndex(headers, [columnName]);
-    if (colIndex === -1) return null;
-
-    const amounts = data.map(row => parseFloat(row[colIndex])).filter(n => !isNaN(n));
-    if (amounts.length === 0) return null;
-
-    return {
-      total: amounts.reduce((a, b) => a + b, 0),
-      average: amounts.reduce((a, b) => a + b, 0) / amounts.length,
-      min: Math.min(...amounts),
-      max: Math.max(...amounts),
-      count: amounts.length
-    };
-  }
-
-  getConfidenceStats(data, headers) {
-    const confCol = this.findColumnIndex(headers, ['confidence']);
-    if (confCol === -1) return null;
-
-    const confidences = data.map(row => parseFloat(row[confCol])).filter(n => !isNaN(n));
-    if (confidences.length === 0) return null;
-
-    return {
-      average: confidences.reduce((a, b) => a + b, 0) / confidences.length,
-      high: confidences.filter(c => c > 0.8).length,
-      medium: confidences.filter(c => c > 0.5 && c <= 0.8).length,
-      low: confidences.filter(c => c <= 0.5).length
-    };
-  }
-
-  findColumnIndex(headers, possibleNames) {
-    for (const name of possibleNames) {
-      const index = headers.findIndex(header => 
-        header && header.toLowerCase().includes(name.toLowerCase())
-      );
-      if (index !== -1) return index;
-    }
-    return -1;
-  }
-
-  generateInsights(sheets) {
+  generateStreamlinedInsights(sheets, isStreamlined) {
     const insights = [];
 
-    // Check for learning system activity
-    const learningSheets = Object.values(sheets).filter(s => 
-      s.learningAnalysis && s.learningAnalysis.totalPatterns > 0
-    );
-    if (learningSheets.length > 0) {
-      insights.push(`🧠 Learning system is active with ${learningSheets[0].learningAnalysis.totalPatterns} patterns learned`);
+    // System type insight
+    if (isStreamlined) {
+      insights.push('🎯 Using streamlined analysis system - optimized performance');
+      
+      // System health insight
+      const systemSheet = sheets['System_Analysis'];
+      if (systemSheet && systemSheet.systemAnalysis) {
+        const health = systemSheet.systemAnalysis.systemHealth;
+        const healthIcon = health === 'HEALTHY' ? '✅' : health === 'WARNING' ? '⚠️' : '🚨';
+        insights.push(`${healthIcon} System health: ${health}`);
+        
+        if (systemSheet.systemAnalysis.criticalIssues.length > 0) {
+          insights.push(`🚨 ${systemSheet.systemAnalysis.criticalIssues.length} critical issues require attention`);
+        }
+      }
+
+      // Excel output insight
+      const outputSheet = sheets['Excel_Analyzer_Output'];
+      if (outputSheet && outputSheet.excelOutputAnalysis) {
+        const status = outputSheet.excelOutputAnalysis.overallStatus;
+        const statusIcon = status === 'HEALTHY' ? '✅' : status === 'WARNING' ? '⚠️' : '🚨';
+        insights.push(`${statusIcon} Excel integration status: ${status}`);
+      }
+    } else {
+      insights.push('📊 Using legacy analysis system - consider upgrading to streamlined approach');
     }
 
-    // Check transaction volume
+    // Transaction insights
     const transactionSheets = Object.values(sheets).filter(s => s.transactionAnalysis);
     if (transactionSheets.length > 0) {
-      const totalTransactions = transactionSheets.reduce((sum, s) => sum + s.transactionAnalysis.totalTransactions, 0);
-      insights.push(`💳 Processing ${totalTransactions} total transactions`);
+      const totalTransactions = transactionSheets.reduce((sum, sheet) => 
+        sum + sheet.transactionAnalysis.totalTransactions, 0);
+      insights.push(`💰 ${totalTransactions} transactions processed across ${transactionSheets.length} sheet(s)`);
     }
 
-    // Check category coverage
+    // Category insights
     const categorySheets = Object.values(sheets).filter(s => s.categoryAnalysis);
     if (categorySheets.length > 0) {
       insights.push(`📊 ${categorySheets[0].categoryAnalysis.totalCategories} categories configured`);
+    }
+
+    // Check for duplicate/conflicting analysis systems
+    const hasLegacyLearning = Object.values(sheets).some(s => s.learningAnalysis);
+    const hasSystemAnalysis = Object.values(sheets).some(s => s.systemAnalysis);
+    
+    if (hasLegacyLearning && hasSystemAnalysis) {
+      insights.push(`🔄 Both legacy and streamlined systems detected - migration recommended`);
     }
 
     return insights;
@@ -285,15 +457,28 @@ class ExcelAnalyzer {
   }
 
   /**
-   * Generate readable report
+   * Generate readable report - UPDATED FOR STREAMLINED SYSTEM
    */
   generateReport(analysis) {
     let report = `
 # Finance Automation Analysis Report
 Generated: ${new Date().toLocaleString()}
 
-## Summary
+## System Type
 `;
+
+    // System type detection
+    if (analysis.streamlinedSystemDetected) {
+      report += `🎯 **STREAMLINED ANALYSIS SYSTEM DETECTED**\n\n`;
+      report += `This system uses the new unified approach with:\n`;
+      report += `- System_Analysis: Unified event logging\n`;
+      report += `- Excel_Analyzer_Output: Clean summary data\n`;
+    } else {
+      report += `📊 **LEGACY SYSTEM DETECTED**\n\n`;
+      report += `⚠️ Consider upgrading to the streamlined analysis system for better performance and maintenance.\n`;
+    }
+
+    report += `\n## Summary\n`;
 
     // Add insights
     if (analysis.insights.length > 0) {
@@ -301,6 +486,37 @@ Generated: ${new Date().toLocaleString()}
       analysis.insights.forEach(insight => {
         report += `- ${insight}\n`;
       });
+    }
+
+    // Special streamlined system summary
+    if (analysis.streamlinedSystemDetected) {
+      report += `\n### Streamlined System Status\n`;
+      
+      const systemSheet = analysis.sheets['System_Analysis'];
+      if (systemSheet && systemSheet.systemAnalysis) {
+        const sa = systemSheet.systemAnalysis;
+        report += `- System Health: **${sa.systemHealth}**\n`;
+        report += `- Total Events: ${sa.totalEvents}\n`;
+        report += `- Critical Issues: ${sa.criticalIssues.length}\n`;
+        
+        if (sa.actionItems.length > 0) {
+          report += `\n#### ⚡ Action Items Required:\n`;
+          sa.actionItems.forEach(item => {
+            report += `- ${item.action}: ${item.message}\n`;
+          });
+        }
+      }
+
+      const outputSheet = analysis.sheets['Excel_Analyzer_Output'];
+      if (outputSheet && outputSheet.excelOutputAnalysis) {
+        const ea = outputSheet.excelOutputAnalysis;
+        report += `\n#### 📈 Excel Integration Metrics:\n`;
+        
+        Object.entries(ea.metrics).forEach(([metric, data]) => {
+          const status = data.status === 'Good' ? '✅' : data.status === 'Review' ? '⚠️' : '❌';
+          report += `- ${metric}: ${data.value} ${status}\n`;
+        });
+      }
     }
 
     // Add sheet details
@@ -318,25 +534,97 @@ Generated: ${new Date().toLocaleString()}
         report += `- Last Updated: ${sheet.lastUpdated}\n`;
       }
 
-      // Add specific analysis
+      // Streamlined system analysis
+      if (sheet.systemAnalysis) {
+        const sa = sheet.systemAnalysis;
+        report += `\n**🎯 STREAMLINED SYSTEM ANALYSIS:**\n`;
+        report += `- Events: ${sa.totalEvents}\n`;
+        report += `- System Health: ${sa.systemHealth}\n`;
+        report += `- Critical Issues: ${sa.criticalIssues.length}\n`;
+        
+        if (Object.keys(sa.eventTypes).length > 0) {
+          report += `- Event Breakdown:\n`;
+          Object.entries(sa.eventTypes).forEach(([type, count]) => {
+            const icon = type === 'ERROR' ? '❌' : type === 'WARNING' ? '⚠️' : type === 'LEARNING' ? '🧠' : '📝';
+            report += `  - ${icon} ${type}: ${count}\n`;
+          });
+        }
+      }
+
+      if (sheet.excelOutputAnalysis) {
+        const ea = sheet.excelOutputAnalysis;
+        report += `\n**📈 EXCEL INTEGRATION ANALYSIS:**\n`;
+        report += `- Overall Status: ${ea.overallStatus}\n`;
+        report += `- Metrics: ${Object.keys(ea.metrics).length}\n`;
+        report += `- Action Items: ${ea.actionItems.length}\n`;
+      }
+
+      // Legacy system warnings
+      if (sheet.legacyAuditLog) {
+        report += `\n**⚠️ LEGACY AUDIT LOG DETECTED:**\n`;
+        report += `- Entries: ${sheet.legacyAuditLog.totalEntries}\n`;
+        report += `- Status: DEPRECATED - ${sheet.legacyAuditLog.recommendation}\n`;
+      }
+
+      if (sheet.legacyFailedParsing) {
+        report += `\n**⚠️ LEGACY FAILED PARSING DETECTED:**\n`;
+        report += `- Failures: ${sheet.legacyFailedParsing.totalFailures}\n`;
+        report += `- Status: DEPRECATED - ${sheet.legacyFailedParsing.recommendation}\n`;
+      }
+
+      // Standard analysis
       if (sheet.transactionAnalysis) {
         const ta = sheet.transactionAnalysis;
         report += `- Total Transactions: ${ta.totalTransactions}\n`;
         if (ta.dateRange) {
           report += `- Date Range: ${ta.dateRange.range}\n`;
         }
-        if (ta.categories.length > 0) {
+        if (ta.categories && ta.categories.length > 0) {
           report += `- Categories: ${ta.categories.length} unique (${ta.categories.slice(0, 5).join(', ')}${ta.categories.length > 5 ? '...' : ''})\n`;
         }
       }
 
       if (sheet.learningAnalysis) {
         const la = sheet.learningAnalysis;
+        if (la.isLegacy) {
+          report += `\n**⚠️ LEGACY LEARNING ANALYSIS:**\n`;
+          report += `- Consider migration to streamlined system\n`;
+        }
         report += `- Learning Patterns: ${la.totalPatterns}\n`;
         if (la.confidenceLevels) {
-          report += `- High Confidence Patterns: ${la.confidenceLevels.high}\n`;
+          report += `- High Confidence Patterns: ${la.confidenceLevels.high || 'N/A'}\n`;
         }
       }
+    }
+
+    // Migration recommendations
+    if (analysis.streamlinedSystemDetected) {
+      const legacySheets = Object.keys(analysis.sheets).filter(name => 
+        analysis.sheets[name].legacyAuditLog || 
+        analysis.sheets[name].legacyFailedParsing ||
+        (analysis.sheets[name].learningAnalysis && analysis.sheets[name].learningAnalysis.isLegacy)
+      );
+      
+      if (legacySheets.length > 0) {
+        report += `\n## 🔄 Migration Recommendations\n\n`;
+        report += `The following legacy sheets were detected and should be cleaned up:\n`;
+        legacySheets.forEach(sheetName => {
+          report += `- ${sheetName}\n`;
+        });
+        report += `\n**Action:** Run \`cleanupLegacyAnalysisSheets()\` in Google Apps Script to remove deprecated sheets.\n`;
+      } else {
+        report += `\n## ✅ System Status\n\n`;
+        report += `Your system is fully migrated to the streamlined analysis approach. No legacy cleanup needed.\n`;
+      }
+    } else {
+      report += `\n## 🚀 Upgrade Recommendation\n\n`;
+      report += `This system appears to be using the legacy analysis structure. Consider upgrading to the new streamlined system for:\n\n`;
+      report += `✅ **Better Performance:** Fewer sheet operations, improved efficiency\n`;
+      report += `✅ **Cleaner Data Flow:** Single source of truth for all events\n`;
+      report += `✅ **Improved Excel Integration:** Standardized output format\n`;
+      report += `✅ **Easier Maintenance:** Simplified debugging and troubleshooting\n`;
+      report += `✅ **Reduced Complexity:** 2 focused sheets instead of 7+ overlapping ones\n\n`;
+      report += `**Action:** Run \`migrateToStreamlinedSystem()\` in Google Apps Script to upgrade.\n`;
     }
 
     return report;
@@ -395,208 +683,7 @@ async function main() {
 // Export for use as module
 module.exports = ExcelAnalyzer;
 
-// INTEGRATION ENHANCEMENT: Add cross-system integration utilities
-class SystemIntegrationHelper {
-  /**
-   * Check for troubleshooting data and integrate insights
-   */
-  static loadTroubleshootingIntegration() {
-    try {
-      if (fs.existsSync('./troubleshooting-data.json')) {
-        const troubleshootingData = JSON.parse(fs.readFileSync('./troubleshooting-data.json', 'utf8'));
-        console.log('🔧 Troubleshooting integration data loaded');
-        return troubleshootingData;
-      }
-    } catch (error) {
-      console.warn('⚠️ Could not load troubleshooting integration:', error.message);
-    }
-    return null;
-  }
-
-  /**
-   * Enhanced main function with cross-system integration
-   */
-  static async runIntegratedAnalysis() {
-    console.log('🔄 Running integrated system analysis...\n');
-    
-    // Load troubleshooting context
-    const troubleshootingData = this.loadTroubleshootingIntegration();
-    
-    // Find Excel files
-    const files = fs.readdirSync('.').filter(file => file.endsWith('.xlsx') || file.endsWith('.xls'));
-    
-    if (files.length === 0) {
-      console.log('📁 No Excel files found in current directory.');
-      console.log('💡 Place an Excel file in this directory and run again.');
-      return;
-    }
-
-    const excelFile = files[0];
-    console.log(`📊 Analyzing: ${excelFile}`);
-    
-    const analyzer = new ExcelAnalyzer();
-    
-    if (analyzer.loadExcel(excelFile)) {
-      let analysis = analyzer.analyzeFinanceData();
-      
-      // INTEGRATION: Enhance analysis with troubleshooting context
-      if (troubleshootingData) {
-        analysis = this.enhanceAnalysisWithTroubleshooting(analysis, troubleshootingData);
-      }
-      
-      // Export enhanced analysis
-      analyzer.exportAnalysis(analysis, './integrated-analysis.json');
-      
-      // Generate integrated report
-      const report = this.generateIntegratedReport(analysis, troubleshootingData);
-      fs.writeFileSync('./integrated-report.md', report);
-      
-      console.log('\n📊 Integrated analysis complete!');
-      console.log('📄 Files created:');
-      console.log('   - integrated-analysis.json (enhanced data)');
-      console.log('   - integrated-report.md (comprehensive report)');
-      
-      // Display enhanced summary
-      this.displayIntegratedSummary(analysis, troubleshootingData);
-      
-    } else {
-      console.error('❌ Failed to analyze Excel file');
-      process.exit(1);
-    }
-  }
-
-  /**
-   * Enhance analysis with troubleshooting insights
-   */
-  static enhanceAnalysisWithTroubleshooting(analysis, troubleshootingData) {
-    analysis.integrationContext = {
-      troubleshootingTimestamp: troubleshootingData.timestamp,
-      criticalIssues: troubleshootingData.criticalIssues?.length || 0,
-      parsingFailures: troubleshootingData.parsingFailures?.length || 0,
-      learningProblems: troubleshootingData.learningProblems?.length || 0,
-      systemHealth: troubleshootingData.criticalIssues?.length > 0 ? 'CRITICAL' : 'STABLE'
-    };
-
-    // Enhance insights with troubleshooting context
-    if (troubleshootingData.criticalIssues?.length > 0) {
-      analysis.insights.unshift(`🚨 ${troubleshootingData.criticalIssues.length} critical issues require immediate attention`);
-    }
-    
-    if (troubleshootingData.parsingFailures?.length > 0) {
-      analysis.insights.push(`🔍 ${troubleshootingData.parsingFailures.length} parsing failures detected - system efficiency compromised`);
-    }
-
-    if (troubleshootingData.learningProblems?.length > 0) {
-      analysis.insights.push(`🧠 ${troubleshootingData.learningProblems.length} learning system issues found - accuracy may be reduced`);
-    }
-
-    return analysis;
-  }
-
-  /**
-   * Generate comprehensive integrated report
-   */
-  static generateIntegratedReport(analysis, troubleshootingData) {
-    const analyzer = new ExcelAnalyzer();
-    let report = analyzer.generateReport(analysis);
-    
-    if (troubleshootingData) {
-      report += `
-
-# 🔧 System Integration Analysis
-
-This analysis incorporates insights from automated troubleshooting performed on ${new Date(troubleshootingData.timestamp).toLocaleString()}.
-
-## Integration Status
-- **Troubleshooting Integration**: ✅ Active
-- **System Health**: ${analysis.integrationContext?.systemHealth || 'UNKNOWN'}
-- **Cross-system Data Flow**: ✅ Operational
-
-## Critical Findings Integration
-
-### 🚨 Critical Issues (${troubleshootingData.criticalIssues?.length || 0})
-${troubleshootingData.criticalIssues?.map(issue => `- ${typeof issue === 'object' ? issue.issue : issue}`).join('\n') || 'No critical issues detected'}
-
-### 🔍 Parsing System Analysis (${troubleshootingData.parsingFailures?.length || 0} failures)
-${troubleshootingData.parsingFailures?.map(failure => `- ${typeof failure === 'object' ? failure.pattern || failure.issue : failure}`).join('\n') || 'No parsing failures detected'}
-
-### 🧠 Learning System Status (${troubleshootingData.learningProblems?.length || 0} issues)
-${troubleshootingData.learningProblems?.map(problem => `- ${typeof problem === 'object' ? problem.issue : problem}`).join('\n') || 'Learning system operating normally'}
-
-## Recommended Actions
-
-### Immediate (Next 24 hours)
-${troubleshootingData.criticalIssues?.filter(issue => typeof issue === 'object' && issue.priority === 'HIGH').map(issue => `- ${issue.issue}`).join('\n') || '- Monitor system stability'}
-
-### Short-term (Next week)
-${troubleshootingData.recommendations?.slice(0, 3).map(rec => `- ${rec}`).join('\n') || '- Continue regular monitoring'}
-
-### Long-term (Next month)
-- Review and optimize parsing patterns based on failure analysis
-- Enhance learning system accuracy based on identified problems
-- Implement preventive measures for recurring issues
-
-## Integration Workflow
-1. **Troubleshooting Analysis** → Identifies issues and patterns
-2. **Excel Analysis** → Provides data context and validation
-3. **Integrated Report** → Combines insights for actionable intelligence
-4. **Google Apps Script Integration** → Implements fixes automatically
-
----
-*This integrated analysis ensures comprehensive system health monitoring and proactive issue resolution.*
-`;
-    }
-    
-    return report;
-  }
-
-  /**
-   * Display enhanced summary with integration context
-   */
-  static displayIntegratedSummary(analysis, troubleshootingData) {
-    console.log('\n📋 Integrated Analysis Summary:');
-    
-    // Standard analysis summary
-    analysis.insights.forEach(insight => console.log(`   ${insight}`));
-    
-    console.log(`\n📊 Sheets processed: ${Object.keys(analysis.sheets).length}`);
-    Object.keys(analysis.sheets).forEach(name => 
-      console.log(`   - ${name} (${analysis.sheets[name].rows} rows)`)
-    );
-
-    // Integration-specific summary
-    if (troubleshootingData) {
-      console.log('\n🔧 Integration Context:');
-      console.log(`   - Troubleshooting data: ${new Date(troubleshootingData.timestamp).toLocaleString()}`);
-      console.log(`   - System health: ${analysis.integrationContext?.systemHealth || 'UNKNOWN'}`);
-      console.log(`   - Total issues: ${(troubleshootingData.criticalIssues?.length || 0) + (troubleshootingData.parsingFailures?.length || 0) + (troubleshootingData.learningProblems?.length || 0)}`);
-      
-      if (troubleshootingData.criticalIssues?.length > 0) {
-        console.log('\n🚨 CRITICAL ISSUES REQUIRE IMMEDIATE ATTENTION:');
-        troubleshootingData.criticalIssues.forEach((issue, i) => {
-          const issueText = typeof issue === 'object' ? issue.issue : issue;
-          console.log(`   ${i+1}. ${issueText}`);
-        });
-      }
-    }
-  }
-}
-
-// Enhanced run function for integrated analysis
-async function runIntegratedAnalysis() {
-  return SystemIntegrationHelper.runIntegratedAnalysis();
-}
-
-// Run if called directly
+// Run main function if called directly
 if (require.main === module) {
-  // Check if troubleshooting integration is available
-  const troubleshootingData = SystemIntegrationHelper.loadTroubleshootingIntegration();
-  
-  if (troubleshootingData) {
-    console.log('🔧 Running integrated analysis with troubleshooting context...');
-    runIntegratedAnalysis().catch(console.error);
-  } else {
-    console.log('📊 Running standard analysis...');
-    main().catch(console.error);
-  }
+  main().catch(console.error);
 }
