@@ -39,7 +39,9 @@ const SHEET_NAMES = {
   NETWORTH: 'NetWorthHistory',
   DASHBOARD: 'Dashboard',
   CSV_IMPORT: 'CSV_Import',
-  AUDIT_LOG: 'AuditLog'
+  AUDIT_LOG: 'AuditLog',
+  AI_LEARNING: 'AI_Learning_Hub',      // Unified learning system
+  FAILED_PARSING: 'Failed_Parsing'     // Consolidated parsing failures
 };
 
 // Column mappings (based on live data structure)
@@ -97,7 +99,11 @@ const CONFIG = {
   STALE_CLEANUP_HOURS: 72,
   MAX_PROCESSING_ATTEMPTS: 3,
   DASHBOARD_ANALYSIS_DAYS: 30,
-  YAHOO_FINANCE_RATE_LIMIT: 200
+  YAHOO_FINANCE_RATE_LIMIT: 200,
+  LEARNING_ENABLED: true,
+  PATTERN_CONFIDENCE_THRESHOLD: 0.7,
+  ADAPTATION_TRIGGER_COUNT: 3,
+  LEARNING_RETENTION_DAYS: 90
 };
 
 // Account definitions (from live analysis)
@@ -406,6 +412,15 @@ function _setupInitialSheets(ss) {
       ],
       [SHEET_NAMES.AUDIT_LOG]: [
         'Timestamp', 'Level', 'Message', 'Details', 'Function'
+      ],
+      [SHEET_NAMES.LEARNING_LOG]: [
+        'Timestamp', 'Pattern Type', 'Pattern', 'Confidence', 'Usage Count', 'Success Rate', 'Adaptation Suggested', 'Status'
+      ],
+      [SHEET_NAMES.PATTERN_LIBRARY]: [
+        'Timestamp', 'SenderId', 'PatternType', 'Pattern', 'Context', 'SuccessCount', 'LastUsed', 'Confidence'
+      ],
+      [SHEET_NAMES.FAILED_EMAILS]: [
+        'Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 'FailureReason', 'AttemptedParsers', 'PatternSuggestions', 'Status'
       ]
     };
     
@@ -862,6 +877,390 @@ function _enhanceMerchantName(rawMerchant, senderId) {
   }
   
   return cleaned || rawMerchant;
+}
+
+// ===================== ADAPTIVE LEARNING FRAMEWORK =====================
+
+/**
+ * Self-learning system that analyzes parsing failures and adapts patterns
+ */
+function _logParsingFailure(message, subject, body, failureReason, attemptedParsers = []) {
+  if (!CONFIG.LEARNING_ENABLED) return;
+  
+  try {
+    const ss = _ss();
+    let failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_EMAILS);
+    
+    if (!failedSheet) {
+      failedSheet = ss.insertSheet(SHEET_NAMES.FAILED_EMAILS);
+      failedSheet.appendRow([
+        'Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 
+        'FailureReason', 'AttemptedParsers', 'PatternSuggestions', 'Status'
+      ]);
+    }
+    
+    const suggestions = _generatePatternSuggestions(subject, body, attemptedParsers);
+    
+    failedSheet.appendRow([
+      new Date(),
+      message.getId(),
+      message.getFrom(),
+      subject.substring(0, 100),
+      body.substring(0, 200),
+      failureReason,
+      attemptedParsers.join(', '),
+      JSON.stringify(suggestions),
+      'PENDING_ANALYSIS'
+    ]);
+    
+    _analyzeFailurePatterns();
+    
+  } catch (error) {
+    _logError('Failed to log parsing failure', error);
+  }
+}
+
+/**
+ * Generates pattern suggestions based on email content
+ */
+function _generatePatternSuggestions(subject, body, attemptedParsers) {
+  const suggestions = {
+    amountPatterns: [],
+    merchantPatterns: [],
+    senderIdentification: [],
+    keywords: []
+  };
+  
+  // Extract potential amount patterns
+  const amountMatches = body.match(/\$?[0-9,]+\.[0-9]{2}/g) || [];
+  amountMatches.forEach(match => {
+    const context = body.substring(Math.max(0, body.indexOf(match) - 20), body.indexOf(match) + match.length + 20);
+    suggestions.amountPatterns.push({
+      pattern: match,
+      context: context.trim(),
+      confidence: 0.8
+    });
+  });
+  
+  // Extract potential merchant patterns
+  const merchantIndicators = ['to ', 'at ', 'from ', 'merchant:', 'payee:'];
+  merchantIndicators.forEach(indicator => {
+    const regex = new RegExp(indicator + '([A-Za-z0-9\\s,.-]{5,30})', 'gi');
+    const matches = body.match(regex) || [];
+    matches.forEach(match => {
+      suggestions.merchantPatterns.push({
+        pattern: match.replace(indicator, '').trim(),
+        indicator: indicator,
+        confidence: 0.6
+      });
+    });
+  });
+  
+  // Suggest sender identification improvements
+  const from = subject.toLowerCase();
+  if (!attemptedParsers.includes('domain_match')) {
+    const domain = from.match(/@([^>]+)/);
+    if (domain) {
+      suggestions.senderIdentification.push({
+        type: 'domain',
+        value: domain[1],
+        confidence: 0.9
+      });
+    }
+  }
+  
+  return suggestions;
+}
+
+/**
+ * Analyzes failure patterns and suggests adaptations
+ */
+function _analyzeFailurePatterns() {
+  try {
+    const ss = _ss();
+    const failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_EMAILS);
+    if (!failedSheet || failedSheet.getLastRow() < 2) return;
+    
+    let learningSheet = ss.getSheetByName(SHEET_NAMES.LEARNING_LOG);
+    if (!learningSheet) {
+      learningSheet = ss.insertSheet(SHEET_NAMES.LEARNING_LOG);
+      learningSheet.appendRow([
+        'Timestamp', 'Pattern Type', 'Pattern', 'Confidence', 'Usage Count', 
+        'Success Rate', 'Adaptation Suggested', 'Status'
+      ]);
+    }
+    
+    const failures = failedSheet.getDataRange().getValues().slice(1);
+    const recentFailures = failures.filter(row => {
+      const timestamp = new Date(row[0]);
+      const daysDiff = (new Date() - timestamp) / (1000 * 60 * 60 * 24);
+      return daysDiff <= CONFIG.LEARNING_RETENTION_DAYS;
+    });
+    
+    // Group failures by sender domain
+    const domainFailures = {};
+    recentFailures.forEach(row => {
+      const from = row[2]; // From column
+      const domain = from.match(/@([^>]+)/);
+      if (domain) {
+        const domainKey = domain[1];
+        if (!domainFailures[domainKey]) {
+          domainFailures[domainKey] = [];
+        }
+        domainFailures[domainKey].push(row);
+      }
+    });
+    
+    // Identify domains needing new parsers
+    Object.entries(domainFailures).forEach(([domain, failures]) => {
+      if (failures.length >= CONFIG.ADAPTATION_TRIGGER_COUNT) {
+        _suggestNewParser(domain, failures, learningSheet);
+      }
+    });
+    
+  } catch (error) {
+    _logError('Failed to analyze failure patterns', error);
+  }
+}
+
+/**
+ * Suggests new parser adaptations based on failure analysis
+ */
+function _suggestNewParser(domain, failures, learningSheet) {
+  const suggestions = [];
+  
+  failures.forEach(failure => {
+    try {
+      const patternSuggestions = JSON.parse(failure[7]); // PatternSuggestions column
+      
+      // Analyze amount patterns
+      patternSuggestions.amountPatterns?.forEach(pattern => {
+        if (pattern.confidence > CONFIG.PATTERN_CONFIDENCE_THRESHOLD) {
+          suggestions.push({
+            type: 'amount_pattern',
+            domain: domain,
+            pattern: pattern.pattern,
+            context: pattern.context,
+            confidence: pattern.confidence
+          });
+        }
+      });
+      
+      // Analyze merchant patterns
+      patternSuggestions.merchantPatterns?.forEach(pattern => {
+        if (pattern.confidence > CONFIG.PATTERN_CONFIDENCE_THRESHOLD) {
+          suggestions.push({
+            type: 'merchant_pattern',
+            domain: domain,
+            pattern: pattern.pattern,
+            indicator: pattern.indicator,
+            confidence: pattern.confidence
+          });
+        }
+      });
+      
+    } catch (e) {
+      // Skip malformed suggestions
+    }
+  });
+  
+  // Log the highest confidence suggestions
+  const topSuggestions = suggestions
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 5);
+    
+  topSuggestions.forEach(suggestion => {
+    learningSheet.appendRow([
+      new Date(),
+      suggestion.type,
+      suggestion.pattern,
+      suggestion.confidence,
+      1, // Usage count starts at 1
+      0, // Success rate unknown initially
+      `Consider adding parser for ${domain}`,
+      'PENDING_IMPLEMENTATION'
+    ]);
+  });
+  
+  _logInfo(`Generated ${topSuggestions.length} learning suggestions for domain: ${domain}`);
+}
+
+/**
+ * Adaptive pattern library that learns from successful parses
+ */
+function _recordSuccessfulPattern(patternType, pattern, context, senderId) {
+  if (!CONFIG.LEARNING_ENABLED) return;
+  
+  try {
+    const ss = _ss();
+    let patternSheet = ss.getSheetByName(SHEET_NAMES.PATTERN_LIBRARY);
+    
+    if (!patternSheet) {
+      patternSheet = ss.insertSheet(SHEET_NAMES.PATTERN_LIBRARY);
+      patternSheet.appendRow([
+        'Timestamp', 'SenderId', 'PatternType', 'Pattern', 'Context', 
+        'SuccessCount', 'LastUsed', 'Confidence'
+      ]);
+    }
+    
+    // Check if pattern already exists
+    const data = patternSheet.getDataRange().getValues();
+    let existingRow = -1;
+    
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][1] === senderId && data[i][2] === patternType && data[i][3] === pattern) {
+        existingRow = i + 1;
+        break;
+      }
+    }
+    
+    if (existingRow > 0) {
+      // Update existing pattern
+      const currentCount = parseInt(patternSheet.getRange(existingRow, 6).getValue()) || 0;
+      patternSheet.getRange(existingRow, 6).setValue(currentCount + 1);
+      patternSheet.getRange(existingRow, 7).setValue(new Date());
+      patternSheet.getRange(existingRow, 8).setValue(Math.min(1.0, (currentCount + 1) * 0.1));
+    } else {
+      // Add new pattern
+      patternSheet.appendRow([
+        new Date(),
+        senderId,
+        patternType,
+        pattern,
+        context.substring(0, 100),
+        1,
+        new Date(),
+        0.5 // Initial confidence
+      ]);
+    }
+    
+  } catch (error) {
+    _logError('Failed to record successful pattern', error);
+  }
+}
+
+/**
+ * Enhanced parsing with adaptive learning
+ */
+function _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet) {
+  const attemptedParsers = [];
+  let transaction = null;
+  
+  try {
+    // First try the standard sender-aware parsing
+    const sender = _identifyEmailSender(message.getFrom(), subject, body);
+    attemptedParsers.push(sender.id);
+    
+    if (sender.profile) {
+      transaction = _parseEmailWithSenderContext(message, subject, body, accountsSheet);
+      
+      if (transaction) {
+        // Record successful patterns
+        _recordSuccessfulPattern('sender_identification', sender.id, message.getFrom(), sender.id);
+        if (transaction.amount) {
+          _recordSuccessfulPattern('amount_extraction', transaction.amount.toString(), body.substring(0, 200), sender.id);
+        }
+        if (transaction.merchant && transaction.merchant !== 'Unknown Merchant') {
+          _recordSuccessfulPattern('merchant_extraction', transaction.merchant, body.substring(0, 200), sender.id);
+        }
+        
+        return transaction;
+      }
+    }
+    
+    // If standard parsing failed, try adaptive patterns
+    transaction = _tryAdaptivePatterns(message, subject, body, attemptedParsers);
+    
+    if (transaction) {
+      _recordSuccessfulPattern('adaptive_parsing', 'success', body.substring(0, 100), 'adaptive');
+      return transaction;
+    }
+    
+    // If all parsing failed, log for learning
+    _logParsingFailure(
+      message, 
+      subject, 
+      body, 
+      'All parsing methods failed', 
+      attemptedParsers
+    );
+    
+    return null;
+    
+  } catch (error) {
+    _logParsingFailure(
+      message, 
+      subject, 
+      body, 
+      `Parsing error: ${error.message}`, 
+      attemptedParsers
+    );
+    return null;
+  }
+}
+
+/**
+ * Try parsing using learned adaptive patterns
+ */
+function _tryAdaptivePatterns(message, subject, body, attemptedParsers) {
+  try {
+    const ss = _ss();
+    const patternSheet = ss.getSheetByName(SHEET_NAMES.PATTERN_LIBRARY);
+    if (!patternSheet || patternSheet.getLastRow() < 2) return null;
+    
+    const patterns = patternSheet.getDataRange().getValues().slice(1);
+    const confidenceThreshold = CONFIG.PATTERN_CONFIDENCE_THRESHOLD;
+    
+    // Filter high-confidence patterns
+    const highConfidencePatterns = patterns.filter(row => 
+      parseFloat(row[7]) >= confidenceThreshold // Confidence column
+    );
+    
+    // Try to extract transaction using learned patterns
+    let amount = null;
+    let merchant = null;
+    
+    // Try amount extraction patterns
+    const amountPatterns = highConfidencePatterns.filter(row => row[2] === 'amount_extraction');
+    for (const pattern of amountPatterns) {
+      const amountMatch = body.match(new RegExp(pattern[3].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+      if (amountMatch) {
+        amount = parseFloat(amountMatch[0].replace(/[^0-9.]/g, ''));
+        break;
+      }
+    }
+    
+    // Try merchant extraction patterns
+    const merchantPatterns = highConfidencePatterns.filter(row => row[2] === 'merchant_extraction');
+    for (const pattern of merchantPatterns) {
+      if (body.toLowerCase().includes(pattern[3].toLowerCase())) {
+        merchant = pattern[3];
+        break;
+      }
+    }
+    
+    if (amount && amount > 0) {
+      attemptedParsers.push('adaptive_patterns');
+      
+      return {
+        date: message.getDate(),
+        amount: amount,
+        fromAccount: 'Unknown Account',
+        toAccount: merchant || 'Unknown Merchant',
+        bank: 'Adaptive Learning',
+        notes: `Parsed using adaptive patterns (confidence: learned)`,
+        emailId: message.getId(),
+        type: 'purchase',
+        category: 'Uncategorized'
+      };
+    }
+    
+    return null;
+    
+  } catch (error) {
+    _logError('Adaptive pattern parsing failed', error);
+    return null;
+  }
 }
 
 // ENHANCED: CIBC Email Parser with sender-aware capabilities
@@ -1448,7 +1847,7 @@ function _parsePayPalEmailEnhanced(message, subject, body, senderProfile) {
       }
     }
     
-    return {
+    const transaction = {
       date: message.getDate(),
       amount: -Math.abs(amount), // PayPal authorizations are expenses
       direction: 'OUT',
@@ -1466,6 +1865,13 @@ function _parsePayPalEmailEnhanced(message, subject, body, senderProfile) {
         transactionType: 'authorization'
       }
     };
+    
+    // Record successful patterns for learning
+    _recordSuccessfulPattern('amount_extraction', amount.toString(), body.substring(0, 200), 'paypal');
+    _recordSuccessfulPattern('merchant_extraction', merchant, body.substring(0, 200), 'paypal');
+    _recordSuccessfulPattern('authorization_detection', 'success', subject + ' | ' + body.substring(0, 100), 'paypal');
+    
+    return transaction;
   }
   
   // PayPal Refund detection
@@ -1874,8 +2280,8 @@ function _processNewEmails() {
           
           let transaction = null;
           
-          // Use enhanced sender-aware parsing
-          transaction = _parseEmailWithSenderContext(message, subject, body, accountsSheet);
+          // Use enhanced sender-aware parsing with adaptive learning
+          transaction = _parseEmailWithAdaptiveLearning(message, subject, body, accountsSheet);
           
           if (!transaction) {
             _logInfo(`No transaction extracted from email`, {
@@ -3733,6 +4139,144 @@ function refreshHoldings() {
 
 function updateDashboard() {
   return _updateDashboard();
+}
+
+function analyzeLearningData() {
+  try {
+    _logInfo('=== LEARNING ANALYSIS STARTED ===');
+    _analyzeFailurePatterns();
+    
+    const ss = _ss();
+    const learningSheet = ss.getSheetByName(SHEET_NAMES.LEARNING_LOG);
+    const failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_EMAILS);
+    const patternSheet = ss.getSheetByName(SHEET_NAMES.PATTERN_LIBRARY);
+    
+    let report = "Learning System Analysis Report\n";
+    report += "================================\n\n";
+    
+    if (failedSheet && failedSheet.getLastRow() > 1) {
+      const failureCount = failedSheet.getLastRow() - 1;
+      report += `Failed Email Parsing Attempts: ${failureCount}\n`;
+      
+      // Analyze failure patterns by domain
+      const failures = failedSheet.getDataRange().getValues().slice(1);
+      const domainFailures = {};
+      
+      failures.forEach(row => {
+        const from = row[2];
+        const domain = from.match(/@([^>]+)/);
+        if (domain) {
+          domainFailures[domain[1]] = (domainFailures[domain[1]] || 0) + 1;
+        }
+      });
+      
+      report += "\nFailures by Domain:\n";
+      Object.entries(domainFailures)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .forEach(([domain, count]) => {
+          report += `  ${domain}: ${count} failures\n`;
+        });
+    }
+    
+    if (patternSheet && patternSheet.getLastRow() > 1) {
+      const patternCount = patternSheet.getLastRow() - 1;
+      report += `\nLearned Patterns: ${patternCount}\n`;
+      
+      const patterns = patternSheet.getDataRange().getValues().slice(1);
+      const highConfidencePatterns = patterns.filter(row => parseFloat(row[7]) >= CONFIG.PATTERN_CONFIDENCE_THRESHOLD);
+      report += `High Confidence Patterns (>=${CONFIG.PATTERN_CONFIDENCE_THRESHOLD}): ${highConfidencePatterns.length}\n`;
+    }
+    
+    if (learningSheet && learningSheet.getLastRow() > 1) {
+      const suggestionCount = learningSheet.getLastRow() - 1;
+      report += `\nGenerated Learning Suggestions: ${suggestionCount}\n`;
+      
+      const suggestions = learningSheet.getDataRange().getValues().slice(1);
+      const pendingSuggestions = suggestions.filter(row => row[7] === 'PENDING_IMPLEMENTATION');
+      report += `Pending Implementation: ${pendingSuggestions.length}\n`;
+    }
+    
+    _logInfo('Learning Analysis Complete', { reportPreview: report.substring(0, 200) });
+    
+    // Show report in UI
+    const ui = SpreadsheetApp.getUi();
+    ui.alert('Learning System Analysis', report, ui.ButtonSet.OK);
+    
+    return report;
+    
+  } catch (error) {
+    _logError('Learning analysis failed', error);
+    throw error;
+  }
+}
+
+function implementTopLearningPattern() {
+  try {
+    const ss = _ss();
+    const learningSheet = ss.getSheetByName(SHEET_NAMES.LEARNING_LOG);
+    
+    if (!learningSheet || learningSheet.getLastRow() < 2) {
+      SpreadsheetApp.getUi().alert('No Learning Suggestions', 'No learning suggestions found to implement.', SpreadsheetApp.getUi().ButtonSet.OK);
+      return;
+    }
+    
+    const suggestions = learningSheet.getDataRange().getValues().slice(1);
+    const pendingSuggestions = suggestions.filter(row => row[7] === 'PENDING_IMPLEMENTATION');
+    
+    if (pendingSuggestions.length === 0) {
+      SpreadsheetApp.getUi().alert('No Pending Suggestions', 'No pending learning suggestions found.', SpreadsheetApp.getUi().ButtonSet.OK);
+      return;
+    }
+    
+    // Find highest confidence suggestion
+    const topSuggestion = pendingSuggestions.sort((a, b) => parseFloat(b[3]) - parseFloat(a[3]))[0];
+    
+    const ui = SpreadsheetApp.getUi();
+    const response = ui.alert(
+      'Implement Learning Suggestion',
+      `Top suggestion:\nType: ${topSuggestion[1]}\nPattern: ${topSuggestion[2]}\nConfidence: ${topSuggestion[3]}\n\nThis will add the pattern to your parser. Continue?`,
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (response === ui.Button.YES) {
+      // Add to pattern library as implemented
+      const patternSheet = ss.getSheetByName(SHEET_NAMES.PATTERN_LIBRARY);
+      if (patternSheet) {
+        patternSheet.appendRow([
+          new Date(),
+          'learned',
+          topSuggestion[1], // Pattern Type
+          topSuggestion[2], // Pattern
+          'Implemented from learning suggestion',
+          1, // Success count
+          new Date(),
+          parseFloat(topSuggestion[3]) // Confidence
+        ]);
+      }
+      
+      // Mark as implemented in learning log
+      const rowIndex = suggestions.findIndex(row => 
+        row[1] === topSuggestion[1] && 
+        row[2] === topSuggestion[2]
+      ) + 2; // +2 for header and 0-based indexing
+      
+      learningSheet.getRange(rowIndex, 8).setValue('IMPLEMENTED');
+      learningSheet.getRange(rowIndex, 1).setValue(new Date()); // Update timestamp
+      
+      _logInfo('Learning pattern implemented', {
+        type: topSuggestion[1],
+        pattern: topSuggestion[2],
+        confidence: topSuggestion[3]
+      });
+      
+      ui.alert('Success', 'Learning pattern has been implemented and will be used in future parsing attempts.', ui.ButtonSet.OK);
+    }
+    
+  } catch (error) {
+    _logError('Failed to implement learning pattern', error);
+    SpreadsheetApp.getUi().alert('Error', `Failed to implement pattern: ${error.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
 }
 
 // ===================== DATA REPAIR & MAINTENANCE =====================
