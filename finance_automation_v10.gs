@@ -771,6 +771,22 @@ const SENDER_PROFILES = {
     transactionTypes: ['deposit', 'trade', 'dividend', 'portfolio_update', 'fee'],
     accountDetection: 'account_type_parsing',  // Parses RRSP/TFSA/etc from content
     fallbackAccount: 'Wealthsimple Cash'
+  },
+
+  'paypal': {
+    name: 'PayPal',
+    domains: ['paypal.com', 'intl.paypal.com'],
+    capabilities: {
+      merchantInfo: 'excellent',       // Detailed merchant names and info
+      accountInfo: 'linked_card',      // Shows linked payment method
+      amountPrecision: 'high',         // Exact amounts with currency conversion
+      transactionTiming: 'realtime',   // Real-time authorization notifications
+      recipientInfo: 'excellent',     // Detailed recipient information
+      balanceInfo: 'none'             // No PayPal balance information
+    },
+    transactionTypes: ['authorization', 'payment', 'refund', 'fee'],
+    accountDetection: 'linked_card_analysis',  // Determines linked payment card
+    fallbackAccount: 'PayPal Transaction'
   }
 };
 
@@ -807,6 +823,11 @@ function _identifyEmailSender(from, subject, body) {
     return { id: 'wealthsimple', profile: SENDER_PROFILES.wealthsimple, confidence: 'medium' };
   }
   
+  if (fromLower.includes('paypal') || subjectLower.includes('paypal') ||
+      /you authorized.*to/i.test(bodyLower) || /paypal.*transaction/i.test(bodyLower)) {
+    return { id: 'paypal', profile: SENDER_PROFILES.paypal, confidence: 'medium' };
+  }
+  
   return { id: 'unknown', profile: null, confidence: 'none' };
 }
 
@@ -835,6 +856,8 @@ function _parseEmailWithSenderContext(message, subject, body, accountsSheet) {
       return _parseInteracEmailEnhanced(message, subject, body, sender.profile);
     case 'wealthsimple':
       return _parseWealthsimpleEmailEnhanced(message, subject, body, sender.profile);
+    case 'paypal':
+      return _parsePayPalEmailEnhanced(message, subject, body, sender.profile);
     default:
       return _parseFallbackEmail(message, subject, body);
   }
@@ -879,63 +902,6 @@ function _parseCibcEmailEnhanced(message, subject, body, accountsSheet, senderPr
   const subjectLower = _lc(subject);
   const bodyLower = _lc(body);
   
-  // PAYMENT detection - Credit to card account
-  const paymentKeywords = ['payment', 'payment received', 'new payment to your credit card', 'payment has been applied', 'credit card payment', 'payment processed'];
-  
-  if (paymentKeywords.some(keyword => subjectLower.includes(keyword))) {
-    const amount = _extractAmount(body) || _extractAmount(subject);
-    if (!amount) return null;
-    
-    let targetAccount = 'CIBC Aventura'; // Default
-    if (/aventura/i.test(subject + body)) {
-      targetAccount = 'CIBC Aventura';
-    } else if (/dividend/i.test(subject + body)) {
-      targetAccount = 'CIBC Dividend';
-    } else if (accountsSheet) {
-      targetAccount = _chooseMostNegativeCibcCard(accountsSheet) || 'CIBC Aventura';
-    }
-    
-    return {
-      date: message.getDate(), amount: amount, direction: 'IN', fromAccount: 'External Payment',
-      toAccount: targetAccount, bank: 'CIBC Card Payment', emailId: message.getId(),
-      type: 'Card Payment', notes: `Payment to ${targetAccount}`
-    };
-  }
-  
-  // PURCHASE detection - Debit from card account
-  const purchaseKeywords = ['purchase', 'charge', 'authorization', 'transaction'];
-  
-  if (purchaseKeywords.some(keyword => subjectLower.includes(keyword)) || /purchase of|your card.*was charged|card ending in/i.test(bodyLower)) {
-    const amount = _extractAmount(body) || _extractAmount(subject);
-    if (!amount) return null;
-    
-    let cardAccount = 'CIBC Aventura'; // Default
-    if (/aventura/i.test(subject + body)) {
-      cardAccount = 'CIBC Aventura';
-    } else if (/dividend/i.test(subject + body)) {
-      cardAccount = 'CIBC Dividend';
-    }
-    
-    const merchant = _extractText(body, /at\s+([A-Z0-9 \._\-&']+)\s+was/i) ||
-                     _extractText(body, /merchant[:\s]*([^\n\r]+)/i) ||
-                     _extractText(body, /for\s+\$[\d,]+\.[\d]{2}\s+at\s+([^.]+)\./i) ||
-                     'Merchant';
-    
-    return {
-      date: message.getDate(), amount: -Math.abs(amount), direction: 'OUT', fromAccount: cardAccount,
-      toAccount: merchant, bank: `${cardAccount} Purchase`, emailId: message.getId(),
-      type: 'Card Purchase', notes: `Purchase at ${merchant}`
-    };
-  }
-  
-  return null;
-}
-
-// ENHANCED: CIBC Email Parser with sender-aware capabilities
-function _parseCibcEmailEnhanced(message, subject, body, accountsSheet, senderProfile) {
-  const subjectLower = _lc(subject);
-  const bodyLower = _lc(body);
-  
   // Leverage CIBC's excellent merchant info capability
   const merchantExtractionPatterns = [
     /at\s+([A-Z0-9 \._\-&']+)\s+(?:was|on)/i,
@@ -961,6 +927,47 @@ function _parseCibcEmailEnhanced(message, subject, body, accountsSheet, senderPr
     // Fallback to most negative card logic (CIBC's account detection capability)
     return accountsSheet ? _chooseMostNegativeCibcCard(accountsSheet) || senderProfile.fallbackAccount 
                         : senderProfile.fallbackAccount;
+  }
+  
+  // CREDIT/REFUND detection - Money returned to card account
+  const creditKeywords = ['credit', 'refund', 'return', 'credited', 'received a credit'];
+  const creditPatterns = [
+    /received\s+a\s+credit\s+of\s+\$?([\d,]+\.[\d]{2})/i,
+    /credit\s+of\s+\$?([\d,]+\.[\d]{2})/i,
+    /refund\s+of\s+\$?([\d,]+\.[\d]{2})/i,
+    /return.*\$?([\d,]+\.[\d]{2})/i
+  ];
+  
+  if (creditKeywords.some(keyword => subjectLower.includes(keyword)) || 
+      creditPatterns.some(pattern => pattern.test(bodyLower))) {
+    const amount = _extractAmount(body) || _extractAmount(subject);
+    if (!amount) return null;
+    
+    const targetAccount = detectCibcAccount(subject + body);
+    
+    // Extract merchant from credit description
+    const merchantMatch = body.match(/credit.*from\s+([A-Z0-9\*\s\._\-&']+?)(?:\s+on|\s+to|$)/i) ||
+                         body.match(/refund.*from\s+([A-Z0-9\*\s\._\-&']+?)(?:\s+on|\s+to|$)/i);
+    let merchant = merchantMatch ? merchantMatch[1].trim() : 'Credit/Refund';
+    merchant = _enhanceMerchantName(merchant, 'cibc');
+    
+    return {
+      date: message.getDate(),
+      amount: amount, // Positive amount for credit
+      direction: 'IN',
+      fromAccount: merchant,
+      toAccount: targetAccount,
+      bank: `${targetAccount} Credit`,
+      emailId: message.getId(),
+      type: 'Card Credit/Refund',
+      notes: `Credit/refund from ${merchant}`,
+      senderInfo: {
+        id: 'cibc',
+        merchantInfoQuality: senderProfile.capabilities.merchantInfo,
+        accountDetectionMethod: 'card_analysis',
+        transactionType: 'credit'
+      }
+    };
   }
   
   // PAYMENT detection - Credit to card account
@@ -1389,6 +1396,113 @@ function _parseWealthsimpleEmailEnhanced(message, subject, body, senderProfile) 
         }
       };
     }
+  }
+  
+  return null;
+}
+
+// ENHANCED: PayPal Email Parser with sender-aware capabilities
+function _parsePayPalEmailEnhanced(message, subject, body, senderProfile) {
+  const subjectLower = _lc(subject);
+  const bodyLower = _lc(body);
+  
+  // PayPal Authorization detection - Debit transaction
+  const authKeywords = ['you authorized', 'authorization', 'authorized payment'];
+  
+  if (authKeywords.some(keyword => bodyLower.includes(keyword))) {
+    // Extract amount - PayPal often uses USD amounts
+    const usdAmountMatch = body.match(/(?:authorized|payment)\s+(?:of\s+)?(?:us\$|usd?\s*)([0-9,]+\.[0-9]+)/i);
+    const cadAmountMatch = body.match(/\$([0-9,]+\.[0-9]+)\s+cad/i);
+    
+    let amount = 0;
+    let currency = 'CAD';
+    
+    if (cadAmountMatch) {
+      amount = parseFloat(cadAmountMatch[1].replace(/,/g, ''));
+      currency = 'CAD';
+    } else if (usdAmountMatch) {
+      amount = parseFloat(usdAmountMatch[1].replace(/,/g, ''));
+      // Convert USD to CAD (PayPal usually shows both)
+      const cadConversionMatch = body.match(/\$([0-9,]+\.[0-9]+)\s+cad/i);
+      if (cadConversionMatch) {
+        amount = parseFloat(cadConversionMatch[1].replace(/,/g, ''));
+        currency = 'CAD';
+      } else {
+        amount *= 1.37; // Rough USD to CAD conversion
+        currency = 'CAD (converted)';
+      }
+    }
+    
+    if (!amount) return null;
+    
+    // Extract merchant information
+    const merchantMatch = body.match(/(?:to|merchant)\s+([A-Za-z0-9\s,.\-&']+?)(?:\n|email|support|\+|$)/i);
+    let merchant = merchantMatch ? merchantMatch[1].trim() : 'PayPal Merchant';
+    
+    // Extract linked payment method
+    const paymentMethodMatch = body.match(/(?:credit|authorized with)\s+([A-Z\s]+).*?(?:••|ending)(\d{4})/i);
+    let linkedAccount = 'PayPal';
+    
+    if (paymentMethodMatch) {
+      const bankName = paymentMethodMatch[1].trim();
+      const lastFour = paymentMethodMatch[2];
+      
+      // Map to known accounts based on card ending
+      if (lastFour === '6271') {
+        linkedAccount = 'CIBC Aventura';
+      } else if (lastFour === '2866') {
+        linkedAccount = 'CIBC Dividend';
+      } else {
+        linkedAccount = `${bankName} ••${lastFour}`;
+      }
+    }
+    
+    return {
+      date: message.getDate(),
+      amount: -Math.abs(amount), // PayPal authorizations are expenses
+      direction: 'OUT',
+      fromAccount: linkedAccount,
+      toAccount: merchant,
+      bank: 'PayPal Authorization',
+      emailId: message.getId(),
+      type: 'PayPal Payment',
+      notes: `PayPal payment to ${merchant} (${currency})`,
+      senderInfo: {
+        id: 'paypal',
+        merchantInfoQuality: senderProfile.capabilities.merchantInfo,
+        linkedPaymentMethod: linkedAccount,
+        currency: currency,
+        transactionType: 'authorization'
+      }
+    };
+  }
+  
+  // PayPal Refund detection
+  const refundKeywords = ['refund', 'refunded', 'money back', 'reversed'];
+  
+  if (refundKeywords.some(keyword => bodyLower.includes(keyword))) {
+    const amount = _extractAmount(body) || _extractAmount(subject);
+    if (!amount) return null;
+    
+    const merchantMatch = body.match(/(?:from|refund.*from)\s+([A-Za-z0-9\s,.\-&']+?)(?:\n|email|support|\+|$)/i);
+    let merchant = merchantMatch ? merchantMatch[1].trim() : 'PayPal Refund';
+    
+    return {
+      date: message.getDate(),
+      amount: amount, // Positive for refund
+      direction: 'IN',
+      fromAccount: merchant,
+      toAccount: 'PayPal Account',
+      bank: 'PayPal Refund',
+      emailId: message.getId(),
+      type: 'PayPal Refund',
+      notes: `PayPal refund from ${merchant}`,
+      senderInfo: {
+        id: 'paypal',
+        merchantInfoQuality: senderProfile.capabilities.merchantInfo,
+        transactionType: 'refund'
+      }
+    };
   }
   
   return null;
