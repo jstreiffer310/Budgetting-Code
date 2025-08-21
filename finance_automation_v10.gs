@@ -2168,7 +2168,6 @@ function _chooseMostNegativeCibcCard(accountsSheet) {
   
   return mostNegativeCard;
 }
-}
 
 // Parse holdings data from Wealthsimple emails
 function _parseWealthsimpleHoldingsFromEmail(emailBody) {
