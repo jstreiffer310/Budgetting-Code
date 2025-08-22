@@ -4,12 +4,7 @@
       "Parsing error: domain is not defined": 39,
       "All parsing methods failed": 18
     },
-    "learning_effectiveness": {
-      "total_ai_patterns": 79,
-      "total_hub_patterns": 62,
-      "overlapping_patterns": 51,
-      "unique_hub_patterns": 11
-    },
+    "learning_effectiveness": {},
     "email_domain_processing": {
       "account.pcfinancial.ca": 36,
       "unknown": 11,
@@ -20,17 +15,14 @@
     "function_data_gaps": [],
     "improvement_recommendations": [
       "Add domain validation in _extractEmailDomain() function",
-      "Implement fallback parsing strategies in email processing",
-      "Merge 11 unique Learning_Hub patterns into AI_Learning"
+      "Implement fallback parsing strategies in email processing"
     ]
   },
   "flow_analysis": {
     "staging_bottlenecks": [],
-    "categorization_gaps": [
-      "Low categorization rate - check learnCategoriesFromTransactions() effectiveness"
-    ],
+    "categorization_gaps": [],
     "processing_efficiency": {
-      "categorization_rate": 56.52173913043478
+      "categorization_rate": 86.36363636363636
     },
     "data_quality_issues": []
   },
@@ -40,7 +32,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -49,7 +41,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -58,7 +50,7 @@
       "writes_to_sheets": 1,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -69,7 +61,7 @@
         "Email processing",
         "Has 68 parsing failures to analyze",
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -78,7 +70,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -87,7 +79,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -98,7 +90,7 @@
         "Email processing",
         "Has 68 parsing failures to analyze",
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -125,7 +117,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -134,7 +126,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -152,7 +144,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -172,7 +164,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -183,7 +175,67 @@
         "Email processing",
         "Has 68 parsing failures to analyze",
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "showFunctionReference": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "showCoreFunctionsGuide": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze",
+        "ML learning",
+        "Has 97 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "showEmailProcessingGuide": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze",
+        "ML learning",
+        "Has 97 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "showLearningSystemGuide": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 97 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "showAnalysisToolsGuide": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 97 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "showQuickHelp": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze",
+        "ML learning",
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -192,7 +244,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -201,7 +253,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -210,7 +262,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -282,7 +334,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -291,7 +343,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -300,7 +352,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -309,7 +361,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -318,7 +370,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -363,7 +415,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -374,7 +426,7 @@
         "Email processing",
         "Has 68 parsing failures to analyze",
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -385,7 +437,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [],
       "missing_data_connections": [
-        "Function reads from empty Diagnostic_Hub sheet"
+        "Function reads from non-existent Diagnostic_Hub sheet"
       ]
     },
     "showStreamlinedAnalysisMenu": {
@@ -393,7 +445,7 @@
       "writes_to_sheets": 0,
       "data_dependencies": [
         "ML learning",
-        "Has 161 total learning patterns"
+        "Has 97 total learning patterns"
       ],
       "missing_data_connections": []
     },
@@ -416,9 +468,7 @@
       "cleanupLegacySheets processes data but not accessible via menu"
     ],
     "recommended_actions": [
-      "IMMEDIATE: Fix domain extraction in _extractEmailDomain() function",
-      "HIGH: Execute consolidateIntelligentSheets() to merge learning data",
-      "MEDIUM: Improve categorization logic in learnCategoriesFromTransactions()"
+      "IMMEDIATE: Fix domain extraction in _extractEmailDomain() function"
     ]
   }
 }

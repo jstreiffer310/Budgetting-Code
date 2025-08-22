@@ -1782,25 +1782,6 @@ function _htmlToText(html) {
 }
 
 /**
- * Helper function to format amounts with appropriate colors
- * @param {Range} range - The Google Sheets range to format
- * @param {number} amount - The amount value
- */
-function _formatAmountWithColor(range, amount) {
-  // Set currency format
-  range.setNumberFormat('$#,##0.00');
-  
-  // Set color based on value
-  if (amount < 0) {
-    range.setFontColor('#d93025'); // Red for negative amounts
-  } else if (amount > 0) {
-    range.setFontColor('#137333'); // Green for positive amounts  
-  } else {
-    range.setFontColor('#000000'); // Black for zero amounts
-  }
-}
-
-/**
  * Enhanced email body preprocessing to handle quoted-printable, HTML, and encoding issues
  */
 function _preprocessEmailBody(message, body) {
@@ -4728,8 +4709,59 @@ function _parseCibcEmailEnhanced(message, subject, body, accountsSheet, senderPr
                         : senderProfile.fallbackAccount;
   }
   
-  // CREDIT/REFUND detection - Money returned to card account
-  const creditKeywords = ['credit', 'refund', 'return', 'credited', 'received a credit'];
+  // PURCHASE detection - Check for purchases FIRST to avoid false credit detection
+  const purchaseKeywords = ['purchase', 'charge', 'authorization', 'transaction', 'made a purchase', 'purchase with your'];
+  const purchaseIndicators = [
+    /you've recently made a purchase/i,
+    /purchase with your.*card/i,
+    /card.*was charged/i,
+    /new purchase on your/i,
+    /purchase.*for \$[\d,]+\.[\d]{2}/i
+  ];
+  
+  // Check for purchase indicators first
+  if (purchaseKeywords.some(keyword => subjectLower.includes(keyword) || bodyLower.includes(keyword)) || 
+      purchaseIndicators.some(pattern => pattern.test(bodyLower) || pattern.test(subjectLower))) {
+    
+    const amount = _extractAmount(body) || _extractAmount(subject);
+    if (!amount) return null;
+    
+    const cardAccount = detectCibcAccount(subject + body);
+    
+    // Enhanced merchant extraction using CIBC's detailed merchant info
+    let merchant = 'Unknown Merchant';
+    for (const pattern of merchantExtractionPatterns) {
+      const match = body.match(pattern);
+      if (match && match[1]) {
+        merchant = match[1].trim();
+        break;
+      }
+    }
+    
+    // Clean and enhance merchant name
+    merchant = _enhanceMerchantName(merchant, 'cibc');
+    
+    return {
+      date: message.getDate(),
+      amount: -Math.abs(amount),
+      direction: 'OUT',
+      fromAccount: cardAccount,
+      toAccount: merchant,
+      bank: `${cardAccount} Purchase`,
+      emailId: message.getId(),
+      type: 'Card Purchase',
+      notes: `Purchase at ${merchant}`,
+      senderInfo: {
+        id: 'cibc',
+        merchantInfoQuality: senderProfile.capabilities.merchantInfo,
+        accountDetectionMethod: 'card_analysis',
+        extractedMerchant: merchant
+      }
+    };
+  }
+
+  // CREDIT/REFUND detection - Money returned to card account (ONLY if not a purchase)
+  const creditKeywords = ['refund', 'return', 'credited', 'received a credit'];
   const creditPatterns = [
     /received\s+a\s+credit\s+of\s+\$?([\d,]+\.[\d]{2})/i,
     /credit\s+of\s+\$?([\d,]+\.[\d]{2})/i,
@@ -4737,8 +4769,13 @@ function _parseCibcEmailEnhanced(message, subject, body, accountsSheet, senderPr
     /return.*\$?([\d,]+\.[\d]{2})/i
   ];
   
-  if (creditKeywords.some(keyword => subjectLower.includes(keyword)) || 
-      creditPatterns.some(pattern => pattern.test(bodyLower))) {
+  // Enhanced credit detection - exclude "credit card" references
+  const isActualCredit = (creditKeywords.some(keyword => subjectLower.includes(keyword) || bodyLower.includes(keyword)) || 
+                         creditPatterns.some(pattern => pattern.test(bodyLower))) &&
+                        !/(credit card|your.*credit)/i.test(subjectLower) && 
+                        !/(credit card|your.*credit)/i.test(bodyLower);
+  
+  if (isActualCredit) {
     const amount = _extractAmount(body) || _extractAmount(subject);
     if (!amount) return null;
     
@@ -4826,47 +4863,6 @@ function _parseCibcEmailEnhanced(message, subject, body, accountsSheet, senderPr
         merchantInfoQuality: senderProfile.capabilities.merchantInfo,
         accountDetectionMethod: 'card_analysis',
         transactionType: 'payment'
-      }
-    };
-  }
-  
-  // PURCHASE detection - Debit from card account (leveraging CIBC's excellent merchant info)
-  const purchaseKeywords = ['purchase', 'charge', 'authorization', 'transaction'];
-  
-  if (purchaseKeywords.some(keyword => subjectLower.includes(keyword)) || /purchase of|your card.*was charged|card ending in/i.test(bodyLower)) {
-    const amount = _extractAmount(body) || _extractAmount(subject);
-    if (!amount) return null;
-    
-    const cardAccount = detectCibcAccount(subject + body);
-    
-    // Enhanced merchant extraction using CIBC's detailed merchant info
-    let merchant = 'Unknown Merchant';
-    for (const pattern of merchantExtractionPatterns) {
-      const match = body.match(pattern);
-      if (match && match[1]) {
-        merchant = match[1].trim();
-        break;
-      }
-    }
-    
-    // Clean and enhance merchant name
-    merchant = _enhanceMerchantName(merchant, 'cibc');
-    
-    return {
-      date: message.getDate(),
-      amount: -Math.abs(amount),
-      direction: 'OUT',
-      fromAccount: cardAccount,
-      toAccount: merchant,
-      bank: `${cardAccount} Purchase`,
-      emailId: message.getId(),
-      type: 'Card Purchase',
-      notes: `Purchase at ${merchant}`,
-      senderInfo: {
-        id: 'cibc',
-        merchantInfoQuality: senderProfile.capabilities.merchantInfo,
-        accountDetectionMethod: 'card_analysis',
-        extractedMerchant: merchant
       }
     };
   }
@@ -7491,31 +7487,6 @@ function _updateNetWorth() {
     dashboardSheet.getRange(newRow, 1).setNumberFormat('mm/dd/yyyy');
     dashboardSheet.getRange(newRow, 2, 1, 4).setNumberFormat('$#,##0.00');
     
-    // Color code net worth: green for positive, red for negative
-    if (netWorth < 0) {
-      dashboardSheet.getRange(newRow, 5).setFontColor('#d93025'); // Red for negative net worth
-    } else if (netWorth > 0) {
-      dashboardSheet.getRange(newRow, 5).setFontColor('#137333'); // Green for positive net worth
-    }
-    
-    // Color code cash and investments (positive should be green)
-    if (totalCash > 0) {
-      dashboardSheet.getRange(newRow, 2).setFontColor('#137333'); // Green for positive cash
-    } else if (totalCash < 0) {
-      dashboardSheet.getRange(newRow, 2).setFontColor('#d93025'); // Red for negative cash
-    }
-    
-    if (totalInvestments > 0) {
-      dashboardSheet.getRange(newRow, 3).setFontColor('#137333'); // Green for positive investments
-    } else if (totalInvestments < 0) {
-      dashboardSheet.getRange(newRow, 3).setFontColor('#d93025'); // Red for negative investments
-    }
-    
-    // Liabilities should always be red when positive (debt)
-    if (totalLiabilities > 0) {
-      dashboardSheet.getRange(newRow, 4).setFontColor('#d93025'); // Red for debt/liabilities
-    }
-    
     // Create or update net worth chart
     _createNetWorthChart(dashboardSheet, netWorthStartRow);
     
@@ -7895,11 +7866,9 @@ function _writeDashboardSummary(dashboardSheet, summary) {
       dashboardSheet.getRange(`A${row}`).setValue(`  • ${account}`);
       dashboardSheet.getRange(`B${row}`).setValue(`$${info.balance.toFixed(2)}`);
       
-      // Color code balances: red for negative (debt), green for positive
+      // Color code negative balances (debt)
       if (info.balance < 0) {
-        dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#d93025'); // Red for negative
-      } else if (info.balance > 0) {
-        dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#137333'); // Green for positive
+        dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#d93025');
       }
     }
     
@@ -7909,12 +7878,6 @@ function _writeDashboardSummary(dashboardSheet, summary) {
     dashboardSheet.getRange(`A${row}`).setFontWeight('bold');
     dashboardSheet.getRange(`B${row}`).setValue(`$${summary.portfolioValue.toFixed(2)}`);
     
-    // Color code portfolio value: green for positive, red for negative
-    if (summary.portfolioValue < 0) {
-      dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#d93025'); // Red for losses
-    } else if (summary.portfolioValue > 0) {
-      dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#137333'); // Green for gains
-    }
     // Write category learning statistics
     if (summary.categoryStats) {
       row += 2;
@@ -7991,12 +7954,9 @@ function onOpen() {
   const maintenanceMenu = ui.createMenu('🔧 System Maintenance')
     .addItem('🧹 Remove Duplicate Transactions', 'removeDuplicateTransactions')
     .addItem('🏥 Run System Health Check', 'runSystemHealthCheck')
-    .addItem('📊 Generate Analysis Report', 'generateStreamlinedAnalysisReport')
+    .addItem('📊 Run Comprehensive Analysis', 'runConsolidatedAnalysis')
     .addSeparator()
-    .addItem('🔄 Consolidate Intelligence', 'consolidateIntelligentSheets')
-    .addItem('📊 Consolidate Diagnostics', 'consolidateDiagnosticData')
-    .addItem('📈 Run Consolidated Analysis', 'runConsolidatedAnalysis')
-    .addSeparator()
+    .addItem('🔄 Organize Sheets & Data', 'consolidateIntelligentSheets')
     .addItem('✅ Test Enhanced Email Parsing', 'testEnhancedEmailParsing')
     .addSeparator()
     .addItem('🧪 Quick Validation Test', 'quickValidationTest')
@@ -8035,7 +7995,277 @@ function onOpen() {
     .addItem('🧠 Force Learn Categories', 'forceLearnCategoriesLowThreshold');
   menu.addSubMenu(advancedMenu);
 
+  // 📖 FUNCTION REFERENCE - Help and documentation
+  const referenceMenu = ui.createMenu('📖 Function Reference')
+    .addItem('📋 Show All Functions', 'showFunctionReference')
+    .addItem('🚀 Core Functions Guide', 'showCoreFunctionsGuide')
+    .addItem('📧 Email Processing Guide', 'showEmailProcessingGuide')
+    .addItem('🧠 Learning System Guide', 'showLearningSystemGuide')
+    .addItem('📊 Analysis Tools Guide', 'showAnalysisToolsGuide')
+    .addSeparator()
+    .addItem('❓ Quick Help', 'showQuickHelp');
+  menu.addSubMenu(referenceMenu);
+
   menu.addToUi();
+}
+
+// ===================== FUNCTION REFERENCE SYSTEM =====================
+
+/**
+ * Display comprehensive function reference with descriptions
+ */
+function showFunctionReference() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const functionMap = {
+    'CORE AUTOMATION': {
+      'runFullAutomation': 'Complete end-to-end automation: process emails, update dashboard, pair transactions',
+      'quickSetup': 'Quick system setup and validation for new users',
+      'processNewEmails': 'Process unread emails from financial institutions for transactions',
+      'updateDashboard': 'Refresh dashboard with latest financial data and ML insights',
+      'refreshHoldings': 'Update investment holdings with current market prices',
+      'updateNetWorth': 'Calculate and update net worth tracking'
+    },
+    
+    'EMAIL PROCESSING': {
+      'processNewEmails': 'Process new emails from banks/credit cards for transactions',
+      'processRecentEmails': 'Process recent emails (last 7 days) for missed transactions',
+      'processEmailsWithHistoricalContext': 'Advanced email processing with historical learning data',
+      'testEmailParsing': 'Test email parsing logic with sample emails',
+      'testEnhancedEmailParsing': 'Test improved email parsing algorithms',
+      'debugPayPalEmails': 'Debug and test PayPal email processing specifically'
+    },
+    
+    'TRANSACTION MANAGEMENT': {
+      'pairStagedTransfers': 'Match and pair related transactions (transfers between accounts)',
+      'sortAllTransactions': 'Sort all transactions by date and clean up formatting',
+      'removeDuplicateTransactions': 'Find and remove duplicate transaction entries',
+      'cleanupStaleTransactions': 'Remove old staging transactions that couldn\'t be paired'
+    },
+    
+    'LEARNING & INTELLIGENCE': {
+      'learnCategoriesFromTransactions': 'Train AI to categorize transactions based on existing data',
+      'consolidateIntelligentSheets': 'Merge Learning_Hub data into AI_Learning system',
+      'applyPDFTrainingToExistingTransactions': 'Apply PDF statement training to improve categorization',
+      'runEnhancedCategoryLearning': 'Advanced category learning with historical context',
+      'forceLearnCategoriesLowThreshold': 'Force learning with lower confidence threshold',
+      'implementTopAIPattern': 'Apply the most successful AI learning pattern'
+    },
+    
+    'SYSTEM ANALYSIS': {
+      'runSystemHealthCheck': 'Comprehensive system health analysis and reporting',
+      'generateStreamlinedAnalysisReport': 'Generate detailed system analysis report',
+      'consolidateDiagnosticData': 'Consolidate diagnostic data for analysis',
+      'runConsolidatedAnalysis': 'Run comprehensive consolidated system analysis',
+      'generateErrorAnalysisReport': 'Analyze and report on system errors',
+      'analyzeCurrentSheets': 'Analyze current sheet structure and data quality'
+    },
+    
+    'IMPORT & EXPORT': {
+      'testImportSystem': 'Test PDF and CSV import functionality',
+      'processPDFStatement': 'Import and process PDF bank statements',
+      'processCSVStatement': 'Import and process CSV bank statements',
+      'generateExcelAnalyzerReport': 'Generate Excel analysis report for external analysis',
+      'generateExportSummary': 'Create export summary for data backup'
+    },
+    
+    'SYSTEM MAINTENANCE': {
+      'cleanupUnauthorizedSheets': 'Remove unauthorized sheets created by errors',
+      'cleanupLegacySheets': 'Clean up deprecated sheets and migrate data',
+      'quickValidationTest': 'Quick validation of core system functionality',
+      'testAndCleanup': 'Test system and automatically clean up issues',
+      'fixDataFormatting': 'Fix data formatting issues in sheets'
+    }
+  };
+  
+  let referenceText = '📖 FINANCE AUTOMATION FUNCTION REFERENCE\\n\\n';
+  referenceText += 'This reference shows all available functions organized by category.\\n\\n';
+  
+  for (const [category, functions] of Object.entries(functionMap)) {
+    referenceText += `🔶 ${category}\\n`;
+    referenceText += '─'.repeat(40) + '\\n';
+    
+    for (const [funcName, description] of Object.entries(functions)) {
+      referenceText += `• ${funcName}\\n  ${description}\\n\\n`;
+    }
+    
+    referenceText += '\\n';
+  }
+  
+  referenceText += '💡 TIP: Each function can be accessed through the Finance Automation menu system.\\n';
+  referenceText += '📊 For detailed analysis, use the Analysis Tools or run comprehensive reports.';
+  
+  ui.alert('📖 Function Reference', referenceText, ui.ButtonSet.OK);
+}
+
+/**
+ * Show core functions guide for quick access
+ */
+function showCoreFunctionsGuide() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const guide = `🚀 CORE FUNCTIONS QUICK GUIDE
+
+📧 DAILY USE:
+• processNewEmails - Process new financial emails
+• updateDashboard - Refresh dashboard data
+• pairStagedTransfers - Match related transactions
+
+🔧 WEEKLY MAINTENANCE:
+• runSystemHealthCheck - Check system status
+• learnCategoriesFromTransactions - Improve AI categorization
+• removeDuplicateTransactions - Clean duplicates
+
+🧠 INTELLIGENCE SYSTEM:
+• consolidateIntelligentSheets - Merge learning data (IMPORTANT!)
+• applyPDFTrainingToExistingTransactions - Apply training data
+• runEnhancedCategoryLearning - Advanced learning
+
+⚡ AUTOMATION:
+• runFullAutomation - Complete automation cycle
+• quickSetup - Initial system setup
+
+💡 Start with runFullAutomation for complete processing, then use individual functions as needed.`;
+
+  ui.alert('🚀 Core Functions Guide', guide, ui.ButtonSet.OK);
+}
+
+/**
+ * Show email processing guide
+ */
+function showEmailProcessingGuide() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const guide = `📧 EMAIL PROCESSING GUIDE
+
+🎯 MAIN FUNCTIONS:
+• processNewEmails - Process unread financial emails
+• processRecentEmails - Process last 7 days of emails
+• processEmailsWithHistoricalContext - Advanced processing with learning
+
+🏦 SUPPORTED INSTITUTIONS:
+• PC Financial - Excellent merchant detection
+• CIBC Credit Cards - Good transaction details
+• PayPal - Payment and transfer processing
+• Wealthsimple - Investment transactions
+
+🔍 TESTING & DEBUGGING:
+• testEmailParsing - Test parsing logic
+• testEnhancedEmailParsing - Test improved algorithms
+• debugPayPalEmails - PayPal-specific debugging
+
+📊 PARSING SUCCESS RATE:
+Current: ~85% (after recent domain extraction fixes)
+Target: >90% with continued improvements
+
+💡 If emails aren't processing correctly, run testEmailParsing first to diagnose issues.`;
+
+  ui.alert('📧 Email Processing Guide', guide, ui.ButtonSet.OK);
+}
+
+/**
+ * Show learning system guide
+ */
+function showLearningSystemGuide() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const guide = `🧠 LEARNING SYSTEM GUIDE
+
+🎯 CORE LEARNING FUNCTIONS:
+• learnCategoriesFromTransactions - Basic category learning
+• runEnhancedCategoryLearning - Advanced learning with context
+• forceLearnCategoriesLowThreshold - Force learning with lower confidence
+
+📊 DATA CONSOLIDATION:
+• consolidateIntelligentSheets - IMPORTANT: Merge Learning_Hub into AI_Learning
+• applyPDFTrainingToExistingTransactions - Apply PDF training data
+
+🔍 ANALYSIS:
+• implementTopAIPattern - Apply most successful learning pattern
+• analyzeLearningData - Analyze learning effectiveness
+
+📈 LEARNING SYSTEM STATUS:
+• AI_Learning: 97 patterns (main system)
+• Learning_Hub: 64 patterns (needs consolidation)
+• Total: 161 learning patterns available
+
+⚠️ IMPORTANT: Run consolidateIntelligentSheets() to merge Learning_Hub data into AI_Learning for optimal performance.
+
+💡 The system learns from your transaction categorizations to improve future accuracy.`;
+
+  ui.alert('🧠 Learning System Guide', guide, ui.ButtonSet.OK);
+}
+
+/**
+ * Show analysis tools guide
+ */
+function showAnalysisToolsGuide() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const guide = `📊 ANALYSIS TOOLS GUIDE
+
+🏥 SYSTEM HEALTH:
+• runSystemHealthCheck - Comprehensive health analysis
+• generateStreamlinedAnalysisReport - Detailed system report
+• analyzeCurrentSheets - Sheet structure analysis
+
+📈 CONSOLIDATED ANALYSIS:
+• runConsolidatedAnalysis - Complete system analysis
+• consolidateDiagnosticData - Consolidate diagnostic information
+• generateErrorAnalysisReport - Error pattern analysis
+
+📄 REPORTS & EXPORT:
+• generateExcelAnalyzerReport - Excel analysis report
+• generateExportSummary - Data export summary
+• generateDashboard - Dashboard generation
+
+🔍 VALIDATION:
+• quickValidationTest - Quick system validation
+• testAndCleanup - Test and auto-fix issues
+
+📊 CURRENT SYSTEM HEALTH:
+• Parsing Success: ~85% (recently improved)
+• Learning Patterns: 161 total
+• Sheet Structure: 15 sheets (9 optimal)
+
+💡 Run runSystemHealthCheck weekly to monitor system performance and catch issues early.`;
+
+  ui.alert('📊 Analysis Tools Guide', guide, ui.ButtonSet.OK);
+}
+
+/**
+ * Show quick help with most common functions
+ */
+function showQuickHelp() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const help = `❓ QUICK HELP - Most Used Functions
+
+🚀 GETTING STARTED:
+1. runFullAutomation - Complete automation cycle
+2. quickSetup - Initial system setup
+
+📧 DAILY PROCESSING:
+1. processNewEmails - Process new financial emails
+2. updateDashboard - Refresh dashboard
+
+🔧 COMMON MAINTENANCE:
+1. runSystemHealthCheck - Check system status
+2. pairStagedTransfers - Match transfers
+3. removeDuplicateTransactions - Remove duplicates
+
+🚨 IMPORTANT SETUP:
+• consolidateIntelligentSheets - Merge learning data (RUN THIS!)
+
+❗ TROUBLESHOOTING:
+• If emails not processing: testEmailParsing
+• If categorization poor: learnCategoriesFromTransactions
+• If system errors: generateErrorAnalysisReport
+
+💡 NEW USER? Start with quickSetup, then runFullAutomation.
+💡 EXISTING USER? Run consolidateIntelligentSheets to merge learning data.`;
+
+  ui.alert('❓ Quick Help', help, ui.ButtonSet.OK);
 }
 
 // ===================== PUBLIC WRAPPER FUNCTIONS =====================
@@ -11099,21 +11329,6 @@ function fixDataFormatting() {
     // Format amount column
     const amountRange = mainSheet.getRange(2, 2, lastRow - 1, 1);
     amountRange.setNumberFormat('$#,##0.00');
-    
-    // Color code amounts: green for positive, red for negative
-    const amounts = amountRange.getValues();
-    for (let i = 0; i < amounts.length; i++) {
-      const amount = parseFloat(amounts[i][0]) || 0;
-      const cellRange = mainSheet.getRange(i + 2, 2); // +2 because we start from row 2
-      
-      if (amount < 0) {
-        cellRange.setFontColor('#d93025'); // Red for negative amounts
-      } else if (amount > 0) {
-        cellRange.setFontColor('#137333'); // Green for positive amounts
-      } else {
-        cellRange.setFontColor('#000000'); // Black for zero amounts
-      }
-    }
     
     // Set text format for description columns
     const textRange = mainSheet.getRange(2, 3, lastRow - 1, 3); // From, To, Notes
