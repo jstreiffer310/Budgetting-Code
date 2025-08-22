@@ -1,0 +1,79 @@
+#!/bin/bash
+# Fully automatic AI context logging - zero manual input required
+# Captures maximum development context with minimal overhead
+
+# Silent operation - only show errors
+exec 2>/dev/null
+
+# Get commit info
+COMMIT_HASH=$(git rev-parse --short HEAD)
+COMMIT_MESSAGE=$(git log -1 --pretty=%B --no-merges)
+COMMIT_DATE=$(date +%Y-%m-%d)
+COMMIT_TIME=$(date +%H:%M:%S)
+BRANCH=$(git branch --show-current)
+
+# Get file changes automatically
+CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)
+NUM_CHANGES=$(echo "$CHANGED_FILES" | wc -l)
+
+# Auto-detect change type from commit message and files
+CHANGE_TYPE="general"
+if [[ "$COMMIT_MESSAGE" =~ [Ff]ix|[Bb]ug|[Ee]rror ]]; then
+    CHANGE_TYPE="bugfix"
+elif [[ "$COMMIT_MESSAGE" =~ [Ff]eature|[Aa]dd|[Nn]ew ]]; then
+    CHANGE_TYPE="feature"
+elif [[ "$COMMIT_MESSAGE" =~ [Uu]pdate|[Mm]odify|[Cc]hange ]]; then
+    CHANGE_TYPE="update"
+elif [[ "$COMMIT_MESSAGE" =~ [Mm]enu|[Uu]I|[Ii]nterface ]]; then
+    CHANGE_TYPE="ui"
+fi
+
+# Navigate to AI Context System (if exists)
+if [ -d "04-Utilities-Tools/AI-Context-System" ]; then
+    cd "04-Utilities-Tools/AI-Context-System"
+    
+    # Auto-create/update session log
+    SESSION_FILE="SESSION_LOG_$COMMIT_DATE.md"
+    
+    # Create session log if it doesn't exist
+    if [ ! -f "$SESSION_FILE" ]; then
+        cat > "$SESSION_FILE" << EOF
+# Session Log: $COMMIT_DATE - Development Session
+
+## 📅 Session Overview
+**Date**: $COMMIT_DATE
+**Branch**: $BRANCH
+**Auto-generated**: $(date +%H:%M:%S)
+
+## 🔄 Commits Made Today
+
+EOF
+    fi
+    
+    # Append commit with smart context
+    cat >> "$SESSION_FILE" << EOF
+### [$COMMIT_HASH] $CHANGE_TYPE
+**Time**: $COMMIT_TIME | **Files**: $NUM_CHANGES changed
+**Message**: $COMMIT_MESSAGE
+
+EOF
+    
+    # Auto-regenerate context (silently)
+    if command -v python >/dev/null 2>&1; then
+        python ai_context_accelerator.py >/dev/null 2>&1
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 ai_context_accelerator.py >/dev/null 2>&1
+    fi
+    
+    # Navigate back
+    cd ../..
+    
+    # Auto-commit context updates (silently)
+    git add "04-Utilities-Tools/AI-Context-System/" >/dev/null 2>&1
+    if ! git diff --cached --quiet "04-Utilities-Tools/AI-Context-System/" 2>/dev/null; then
+        git commit -m "Auto-context: $CHANGE_TYPE ($COMMIT_HASH)" >/dev/null 2>&1
+    fi
+fi
+
+# Silent success - no output unless error
+exit 0
