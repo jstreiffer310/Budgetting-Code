@@ -7938,8 +7938,8 @@ function onOpen() {
   menu.addSeparator();
 
   // �🚀 MAIN ACTIONS - Core functionality
-  menu.addItem('🚀 Run Full Automation', 'runFullAutomation');
   menu.addItem('⚡ Quick Setup', 'quickSetup');
+  menu.addItem('🚀 Run Full Automation', 'runFullAutomation');
   menu.addSeparator();
 
   // 📊 DASHBOARD & UPDATES
@@ -7962,7 +7962,21 @@ function onOpen() {
     .addItem('📑 Sort All Transactions', 'sortAllTransactions');
   menu.addSubMenu(transactionMenu);
 
-  // 🔧 SYSTEM MAINTENANCE - Critical functions
+  // � IMPORT & ANALYSIS
+  const importMenu = ui.createMenu('📁 Import & Analysis')
+    .addItem('📄 Test Import System', 'testImportSystem')
+    .addSeparator()
+    .addItem('📊 Process PDF Statement', 'processPDFStatement')
+    .addItem('📄 Process CSV Statement', 'processCSVStatement')
+    .addItem('🔄 Enhanced Category Learning', 'runEnhancedCategoryLearning')
+    .addSeparator()
+    .addItem('ℹ️ CSV Import Info', 'showCSVImportInfo')
+    .addItem('ℹ️ PDF Import Info', 'showPDFImportInfo')
+    .addSeparator()
+    .addItem('📊 Transaction Order Stats', 'getTransactionOrderStats');
+  menu.addSubMenu(importMenu);
+
+  // �🔧 SYSTEM MAINTENANCE - Critical functions
   const maintenanceMenu = ui.createMenu('🔧 System Maintenance')
     .addItem('🧹 Remove Duplicate Transactions', 'removeDuplicateTransactions')
     .addItem('🏥 Run System Health Check', 'runSystemHealthCheck')
@@ -7976,20 +7990,6 @@ function onOpen() {
     .addItem('📊 Analyze Current Sheets', 'analyzeCurrentSheets')
     .addItem('🔧 Test & Auto-Cleanup', 'testAndCleanup');
   menu.addSubMenu(maintenanceMenu);
-
-  // 📁 IMPORT & ANALYSIS
-  const importMenu = ui.createMenu('📁 Import & Analysis')
-    .addItem('📄 Test Import System', 'testImportSystem')
-    .addSeparator()
-    .addItem('📊 Process PDF Statement', 'processPDFStatement')
-    .addItem('📄 Process CSV Statement', 'processCSVStatement')
-    .addItem('🔄 Enhanced Category Learning', 'runEnhancedCategoryLearning')
-    .addSeparator()
-    .addItem('ℹ️ CSV Import Info', 'showCSVImportInfo')
-    .addItem('ℹ️ PDF Import Info', 'showPDFImportInfo')
-    .addSeparator()
-    .addItem('📊 Transaction Order Stats', 'getTransactionOrderStats');
-  menu.addSubMenu(importMenu);
   
   // 🧪 ADVANCED TOOLS - For debugging and testing
   const advancedMenu = ui.createMenu('🧪 Advanced Tools')
