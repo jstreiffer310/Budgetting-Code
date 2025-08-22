@@ -1,0 +1,424 @@
+{
+  "email_insights": {
+    "failed_parsing_patterns": {
+      "Parsing error: domain is not defined": 39,
+      "All parsing methods failed": 18
+    },
+    "learning_effectiveness": {
+      "total_ai_patterns": 79,
+      "total_hub_patterns": 62,
+      "overlapping_patterns": 51,
+      "unique_hub_patterns": 11
+    },
+    "email_domain_processing": {
+      "account.pcfinancial.ca": 36,
+      "unknown": 11,
+      "cibc.com": 11,
+      "intl.paypal.com": 8,
+      "wealthsimple.com": 2
+    },
+    "function_data_gaps": [],
+    "improvement_recommendations": [
+      "Add domain validation in _extractEmailDomain() function",
+      "Implement fallback parsing strategies in email processing",
+      "Merge 11 unique Learning_Hub patterns into AI_Learning"
+    ]
+  },
+  "flow_analysis": {
+    "staging_bottlenecks": [],
+    "categorization_gaps": [
+      "Low categorization rate - check learnCategoriesFromTransactions() effectiveness"
+    ],
+    "processing_efficiency": {
+      "categorization_rate": 56.52173913043478
+    },
+    "data_quality_issues": []
+  },
+  "function_relationships": {
+    "consolidateIntelligentSheets": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "applyPDFTrainingToExistingTransactions": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "testImportSystem": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 1,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "generateStreamlinedAnalysisReport": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze",
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "cleanupLegacyAnalysisSheets": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "consolidateDiagnosticData": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "showSystemEnhancementSummary": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze",
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "runCompleteSystemTest": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "testEnhancedEmailParsing": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "runConsolidatedAnalysis": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "generateExcelAnalyzerReport": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "demonstrateUnifiedDiagnostics": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "detectCibcAccount": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "sortAllTransactions": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "validateCategorizationAgainstPDFTraining": {
+      "reads_from_sheets": [
+        "Categorization_Metadata"
+      ],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "onOpen": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze",
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "learnCategoriesFromTransactions": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "diagnosticCategoryLearning": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "forceLearnCategoriesLowThreshold": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "runFullAutomation": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "quickSetup": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "setupSheetsManually": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 1,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "showConfiguration": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "testEmailParsing": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "debugPayPalEmails": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "processNewEmails": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "analyzeLearningData": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "implementTopAIPattern": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "runEnhancedCategoryLearning": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "learnCategories": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "getSystemHealthForIntegration": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "processEmailsWithHistoricalContext": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "showMainMenu": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "showImportMenu": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "processRecentEmails": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    },
+    "showHealthCheckMenu": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "showAdvancedToolsMenu": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze",
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "cleanupLegacySheets": {
+      "reads_from_sheets": [
+        "Diagnostic_Hub"
+      ],
+      "writes_to_sheets": 0,
+      "data_dependencies": [],
+      "missing_data_connections": [
+        "Function reads from empty Diagnostic_Hub sheet"
+      ]
+    },
+    "showStreamlinedAnalysisMenu": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "ML learning",
+        "Has 161 total learning patterns"
+      ],
+      "missing_data_connections": []
+    },
+    "quickFixCommonIssues": {
+      "reads_from_sheets": [],
+      "writes_to_sheets": 0,
+      "data_dependencies": [
+        "Email processing",
+        "Has 68 parsing failures to analyze"
+      ],
+      "missing_data_connections": []
+    }
+  },
+  "optimization_report": {
+    "critical_issues": [],
+    "performance_bottlenecks": [],
+    "data_inconsistencies": [],
+    "function_accessibility_gaps": [
+      "validateCategorizationAgainstPDFTraining processes data but not accessible via menu",
+      "cleanupLegacySheets processes data but not accessible via menu"
+    ],
+    "recommended_actions": [
+      "IMMEDIATE: Fix domain extraction in _extractEmailDomain() function",
+      "HIGH: Execute consolidateIntelligentSheets() to merge learning data",
+      "MEDIUM: Improve categorization logic in learnCategoriesFromTransactions()"
+    ]
+  }
+}

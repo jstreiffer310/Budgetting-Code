@@ -46,24 +46,31 @@
 
 const SPREADSHEET_ID = '1-eUeYMTeKoz2bIkHS8Jc2J9vO0Bnl8y6aHXmXGdJqg8';
 
-// COMPLETE SHEET STRUCTURE - Matches actual My Budget (11).xlsx structure
+// INTELLIGENT SHEET STRUCTURE - Preserves ML Intelligence, Simplifies Interface (9 sheets)
 const SHEET_NAMES = {
-  // CORE DATA SHEETS (5 sheets - Essential)
-  MAIN: 'Transactions',           // Primary transaction data (23 rows)
-  ACCOUNTS: 'Accounts',           // Account summaries (6 rows)  
+  // VISIBLE CORE DATA SHEETS (4 sheets - User Interface Only)
+  DASHBOARD: 'Dashboard',         // Visual summary with ML insights (30 rows)
+  MAIN: 'Transactions',           // Primary transaction data (23 rows) 
+  ACCOUNTS: 'Accounts',           // Account summaries (6 rows)
   HOLDINGS: 'Holdings',           // Investment holdings (3 rows)
-  DASHBOARD: 'Dashboard',         // Summary dashboard (30 rows)
-  CATEGORIES: 'Categories',       // Category definitions (0 rows)
   
-  // SYSTEM ANALYSIS SHEET (1 sheet - ALL logging goes here)
-  ANALYSIS: 'System_Analysis',    // Consolidated system events (2 rows - will grow)
-  
-  // PROCESSING SHEETS (3 sheets)
-  FAILED_PARSING: 'Failed_Parsing',     // Failed email parsing (68 rows)
-  CATEGORIZATION_METADATA: 'Categorization_Metadata', // Category metadata (5 rows)
-  CSV_IMPORT: 'CSV_Import',       // CSV import processing (0 rows)
-  STAGING: 'Staging'              // Temporary processing (0 rows)
+  // HIDDEN FUNCTIONAL SHEETS (5 sheets - All system functionality hidden)
+  STAGING: 'Staging',             // Transaction pairing workspace (0 rows) - HIDDEN
+  AI_LEARNING: 'AI_Learning',           // Consolidated ML patterns (161 rows) - HIDDEN
+  ANALYSIS: 'System_Analysis',          // Intelligent audit summary (from 1925 events) - HIDDEN
+  FAILED_PARSING: 'Failed_Parsing',     // AI-analyzed parsing failures (68 rows) - HIDDEN
+  CATEGORIZATION_METADATA: 'Categorization_Metadata' // Recent categorization decisions (5 rows) - HIDDEN
 };
+
+// DEPRECATED SHEETS TO REMOVE (Empty sheets only)
+const DEPRECATED_SHEETS = [
+  'Categories',           // Empty (0 rows)
+  'CSV_Import',          // Empty (0 rows)  
+  'Learning_Hub',        // Merge into AI_Learning
+  'AuditLog',           // Summarize into System_Analysis
+  'Diagnostic_Hub',     // Empty (0 rows)
+  'Excel_Analyzer_Output' // Replace with Python
+];
 
 /**
  * CRITICAL: Validate that we only use predefined sheet names
@@ -77,6 +84,176 @@ function validateSheetName(requestedName) {
     return false;
   }
   return true;
+}
+
+/**
+ * Intelligent sheet consolidation and interface cleanup
+ * Consolidates ML data, hides all functional sheets, keeps only 4 visible user sheets
+ */
+function consolidateIntelligentSheets() {
+  try {
+    const ss = _ss();
+    _logInfo('🧠 Starting intelligent sheet consolidation...');
+    
+    // 1. CONSOLIDATE LEARNING DATA (Learning_Hub + AI_Learning)
+    _consolidateLearningData(ss);
+    
+    // 2. SUMMARIZE AUDIT LOG INTO SYSTEM_ANALYSIS  
+    _summarizeAuditLog(ss);
+    
+    // 3. HIDE ALL FUNCTIONAL SHEETS (Keep only 4 visible: Dashboard, Transactions, Accounts, Holdings)
+    _hideAllFunctionalSheets(ss);
+    
+    // 4. REMOVE DEPRECATED EMPTY SHEETS
+    _removeDeprecatedSheets(ss);
+    
+    _logInfo('✅ Intelligent consolidation complete - 4 visible user sheets, 5 hidden functional sheets');
+    return true;
+    
+  } catch (error) {
+    _logError('Failed to consolidate intelligent sheets', error);
+    return false;
+  }
+}
+
+function _consolidateLearningData(ss) {
+  const learningHubSheet = ss.getSheetByName('Learning_Hub');
+  const aiLearningSheet = ss.getSheetByName('AI_Learning');
+  
+  if (!learningHubSheet || !aiLearningSheet) {
+    _logInfo('Learning sheets already consolidated or missing');
+    return;
+  }
+  
+  // Get all Learning_Hub data
+  const learningHubData = learningHubSheet.getDataRange().getValues();
+  
+  // Append to AI_Learning sheet (which becomes the consolidated sheet)
+  if (learningHubData.length > 1) { // Skip header
+    const dataToAppend = learningHubData.slice(1); // Remove header row
+    const lastRow = aiLearningSheet.getLastRow();
+    
+    if (dataToAppend.length > 0) {
+      aiLearningSheet.getRange(lastRow + 1, 1, dataToAppend.length, dataToAppend[0].length)
+        .setValues(dataToAppend);
+      _logInfo(`Merged ${dataToAppend.length} patterns from Learning_Hub into AI_Learning`);
+    }
+  }
+  
+  // Remove Learning_Hub sheet
+  ss.deleteSheet(learningHubSheet);
+  _logInfo('✅ Learning_Hub merged and removed');
+}
+
+function _summarizeAuditLog(ss) {
+  const auditLogSheet = ss.getSheetByName('AuditLog');
+  const analysisSheet = ss.getSheetByName(SHEET_NAMES.ANALYSIS);
+  
+  if (!auditLogSheet) {
+    _logInfo('AuditLog sheet not found or already processed');
+    return;
+  }
+  
+  const auditData = auditLogSheet.getDataRange().getValues();
+  if (auditData.length < 2) return; // No data to summarize
+  
+  // Generate intelligent summary
+  const summary = _generateAuditSummary(auditData);
+  
+  // Add summary to System_Analysis
+  if (analysisSheet) {
+    const timestamp = new Date();
+    const summaryRow = [
+      timestamp,
+      'AUDIT_SUMMARY',
+      `Processed ${auditData.length - 1} audit events`,
+      'SUCCESS',
+      JSON.stringify(summary),
+      'Consolidated'
+    ];
+    
+    analysisSheet.appendRow(summaryRow);
+    _logInfo(`✅ Summarized ${auditData.length - 1} audit events into System_Analysis`);
+  }
+  
+  // Remove AuditLog sheet
+  ss.deleteSheet(auditLogSheet);
+  _logInfo('✅ AuditLog summarized and removed');
+}
+
+function _generateAuditSummary(auditData) {
+  const summary = {
+    totalEvents: auditData.length - 1,
+    errorCount: 0,
+    warningCount: 0,
+    infoCount: 0,
+    topErrors: {},
+    dateRange: { start: null, end: null }
+  };
+  
+  for (let i = 1; i < auditData.length; i++) {
+    const row = auditData[i];
+    const level = row[1];
+    const message = row[2];
+    
+    // Count by level
+    if (level === 'ERROR') summary.errorCount++;
+    else if (level === 'WARNING') summary.warningCount++;
+    else summary.infoCount++;
+    
+    // Track top errors
+    if (level === 'ERROR') {
+      summary.topErrors[message] = (summary.topErrors[message] || 0) + 1;
+    }
+    
+    // Date range
+    const timestamp = row[0];
+    if (timestamp) {
+      if (!summary.dateRange.start || timestamp < summary.dateRange.start) {
+        summary.dateRange.start = timestamp;
+      }
+      if (!summary.dateRange.end || timestamp > summary.dateRange.end) {
+        summary.dateRange.end = timestamp;
+      }
+    }
+  }
+  
+  return summary;
+}
+
+function _hideAllFunctionalSheets(ss) {
+  const functionalSheets = [
+    SHEET_NAMES.STAGING,                    // Transaction pairing workspace
+    SHEET_NAMES.AI_LEARNING,               // ML patterns  
+    SHEET_NAMES.ANALYSIS,                  // System analysis
+    SHEET_NAMES.FAILED_PARSING,            // Parsing failures
+    SHEET_NAMES.CATEGORIZATION_METADATA    // Categorization decisions
+  ];
+  
+  functionalSheets.forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (sheet) {
+      sheet.hideSheet();
+      _logInfo(`🔒 Hidden functional sheet: ${sheetName}`);
+    }
+  });
+}
+
+function _removeDeprecatedSheets(ss) {
+  DEPRECATED_SHEETS.forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (sheet) {
+      // Skip Learning_Hub and AuditLog as they're handled in consolidation
+      if (sheetName !== 'Learning_Hub' && sheetName !== 'AuditLog') {
+        try {
+          ss.deleteSheet(sheet);
+          _logInfo(`🗑️ Removed deprecated sheet: ${sheetName}`);
+        } catch (error) {
+          _logError(`Failed to remove sheet ${sheetName}`, error);
+        }
+      }
+    }
+  });
 }
 
 // Column mappings (based on live data structure)
@@ -1568,10 +1745,24 @@ function _extractText(text, regex) {
 // CRITICAL FIX: Add domain validation helper function to prevent domain parsing errors
 function _extractEmailDomain(fromField) {
   if (!fromField) return 'unknown';
-  const match = fromField.match(/<([^>]+)>/);
-  const email = match ? match[1] : fromField;
-  const domain = email.split('@')[1];
-  return domain ? domain.toLowerCase() : 'unknown';
+  
+  try {
+    const match = fromField.match(/<([^>]+)>/);
+    const email = match ? match[1] : fromField;
+    
+    if (!email.includes('@')) return 'unknown';
+    
+    const parts = email.split('@');
+    if (parts.length < 2) return 'unknown';
+    
+    const domain = parts[1];
+    if (!domain || domain.trim() === '') return 'unknown';
+    
+    return domain.toLowerCase().trim();
+  } catch (error) {
+    console.log('Domain extraction error:', error);
+    return 'unknown';
+  }
 }
 
 // Helper function to normalize strings for comparison
@@ -1587,6 +1778,25 @@ function _htmlToText(html) {
     return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   } catch (error) {
     return '';
+  }
+}
+
+/**
+ * Helper function to format amounts with appropriate colors
+ * @param {Range} range - The Google Sheets range to format
+ * @param {number} amount - The amount value
+ */
+function _formatAmountWithColor(range, amount) {
+  // Set currency format
+  range.setNumberFormat('$#,##0.00');
+  
+  // Set color based on value
+  if (amount < 0) {
+    range.setFontColor('#d93025'); // Red for negative amounts
+  } else if (amount > 0) {
+    range.setFontColor('#137333'); // Green for positive amounts  
+  } else {
+    range.setFontColor('#000000'); // Black for zero amounts
   }
 }
 
@@ -3987,11 +4197,6 @@ function _recordLearning(type, pattern, context, confidence, metadata = {}) {
     };
     
     _logSystemEvent('AI_LEARNING', `Learning recorded: ${type} - ${pattern}`, learningData);
-    
-  } catch (error) {
-    _logError('Failed to record AI learning', error);
-  }
-}
     
   } catch (error) {
     _logError('Failed to record AI learning', error);
@@ -7286,6 +7491,31 @@ function _updateNetWorth() {
     dashboardSheet.getRange(newRow, 1).setNumberFormat('mm/dd/yyyy');
     dashboardSheet.getRange(newRow, 2, 1, 4).setNumberFormat('$#,##0.00');
     
+    // Color code net worth: green for positive, red for negative
+    if (netWorth < 0) {
+      dashboardSheet.getRange(newRow, 5).setFontColor('#d93025'); // Red for negative net worth
+    } else if (netWorth > 0) {
+      dashboardSheet.getRange(newRow, 5).setFontColor('#137333'); // Green for positive net worth
+    }
+    
+    // Color code cash and investments (positive should be green)
+    if (totalCash > 0) {
+      dashboardSheet.getRange(newRow, 2).setFontColor('#137333'); // Green for positive cash
+    } else if (totalCash < 0) {
+      dashboardSheet.getRange(newRow, 2).setFontColor('#d93025'); // Red for negative cash
+    }
+    
+    if (totalInvestments > 0) {
+      dashboardSheet.getRange(newRow, 3).setFontColor('#137333'); // Green for positive investments
+    } else if (totalInvestments < 0) {
+      dashboardSheet.getRange(newRow, 3).setFontColor('#d93025'); // Red for negative investments
+    }
+    
+    // Liabilities should always be red when positive (debt)
+    if (totalLiabilities > 0) {
+      dashboardSheet.getRange(newRow, 4).setFontColor('#d93025'); // Red for debt/liabilities
+    }
+    
     // Create or update net worth chart
     _createNetWorthChart(dashboardSheet, netWorthStartRow);
     
@@ -7665,9 +7895,11 @@ function _writeDashboardSummary(dashboardSheet, summary) {
       dashboardSheet.getRange(`A${row}`).setValue(`  • ${account}`);
       dashboardSheet.getRange(`B${row}`).setValue(`$${info.balance.toFixed(2)}`);
       
-      // Color code negative balances (debt)
+      // Color code balances: red for negative (debt), green for positive
       if (info.balance < 0) {
-        dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#d93025');
+        dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#d93025'); // Red for negative
+      } else if (info.balance > 0) {
+        dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#137333'); // Green for positive
       }
     }
     
@@ -7677,6 +7909,12 @@ function _writeDashboardSummary(dashboardSheet, summary) {
     dashboardSheet.getRange(`A${row}`).setFontWeight('bold');
     dashboardSheet.getRange(`B${row}`).setValue(`$${summary.portfolioValue.toFixed(2)}`);
     
+    // Color code portfolio value: green for positive, red for negative
+    if (summary.portfolioValue < 0) {
+      dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#d93025'); // Red for losses
+    } else if (summary.portfolioValue > 0) {
+      dashboardSheet.getRange(`A${row}:B${row}`).setFontColor('#137333'); // Green for gains
+    }
     // Write category learning statistics
     if (summary.categoryStats) {
       row += 2;
@@ -7755,6 +7993,10 @@ function onOpen() {
     .addItem('🏥 Run System Health Check', 'runSystemHealthCheck')
     .addItem('📊 Generate Analysis Report', 'generateStreamlinedAnalysisReport')
     .addSeparator()
+    .addItem('🔄 Consolidate Intelligence', 'consolidateIntelligentSheets')
+    .addItem('📊 Consolidate Diagnostics', 'consolidateDiagnosticData')
+    .addItem('📈 Run Consolidated Analysis', 'runConsolidatedAnalysis')
+    .addSeparator()
     .addItem('✅ Test Enhanced Email Parsing', 'testEnhancedEmailParsing')
     .addSeparator()
     .addItem('🧪 Quick Validation Test', 'quickValidationTest')
@@ -7766,6 +8008,10 @@ function onOpen() {
   // 📁 IMPORT & ANALYSIS
   const importMenu = ui.createMenu('📁 Import & Analysis')
     .addItem('📄 Test Import System', 'testImportSystem')
+    .addSeparator()
+    .addItem('📊 Process PDF Statement', 'processPDFStatement')
+    .addItem('📄 Process CSV Statement', 'processCSVStatement')
+    .addItem('🔄 Enhanced Category Learning', 'runEnhancedCategoryLearning')
     .addSeparator()
     .addItem('ℹ️ CSV Import Info', 'showCSVImportInfo')
     .addItem('ℹ️ PDF Import Info', 'showPDFImportInfo')
@@ -10853,6 +11099,21 @@ function fixDataFormatting() {
     // Format amount column
     const amountRange = mainSheet.getRange(2, 2, lastRow - 1, 1);
     amountRange.setNumberFormat('$#,##0.00');
+    
+    // Color code amounts: green for positive, red for negative
+    const amounts = amountRange.getValues();
+    for (let i = 0; i < amounts.length; i++) {
+      const amount = parseFloat(amounts[i][0]) || 0;
+      const cellRange = mainSheet.getRange(i + 2, 2); // +2 because we start from row 2
+      
+      if (amount < 0) {
+        cellRange.setFontColor('#d93025'); // Red for negative amounts
+      } else if (amount > 0) {
+        cellRange.setFontColor('#137333'); // Green for positive amounts
+      } else {
+        cellRange.setFontColor('#000000'); // Black for zero amounts
+      }
+    }
     
     // Set text format for description columns
     const textRange = mainSheet.getRange(2, 3, lastRow - 1, 3); // From, To, Notes
