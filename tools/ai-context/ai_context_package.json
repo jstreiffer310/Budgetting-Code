@@ -8,15 +8,15 @@
   },
   "git_context": {
     "recent_commits": [
+      "6ffdec5 Auto-context: general (5c28403)",
       "5c28403 Test automatic git hook system - should trigger AI context logging",
       "8b809b5 Auto-context: bugfix (46c1ce6)",
       "46c1ce6 Improve tests README formatting and remove temporary file",
-      "ecb1c99 Complete repository reorganization with comprehensive documentation",
-      "a16259a Add git hooks installation script"
+      "ecb1c99 Complete repository reorganization with comprehensive documentation"
     ],
     "current_branch": "main",
-    "uncommitted_changes": 3,
-    "last_updated": "2025-08-22T01:37:46.487657"
+    "uncommitted_changes": 1,
+    "last_updated": "2025-08-22T01:37:46.936631"
   },
   "recent_sessions": [
     {
@@ -75,6 +75,6 @@
       "Prefers comprehensive documentation and automation"
     ]
   },
-  "last_updated": "2025-08-22T01:37:46.488067",
+  "last_updated": "2025-08-22T01:37:46.937063",
   "evolution_stage": "Post-menu cleanup, Function Reference optimization"
 }
