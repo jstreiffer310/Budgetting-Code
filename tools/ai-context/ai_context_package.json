@@ -8,15 +8,15 @@
   },
   "git_context": {
     "recent_commits": [
+      "786d95d Auto-context: general (d31e732)",
       "d31e732 Auto-context: general (88f02b1)",
       "88f02b1 Auto-context: general (003bbf7)",
       "003bbf7 Auto-context: general (8c011ca)",
-      "8c011ca Auto-context: general (f104cfe)",
-      "f104cfe Auto-context: general (fb205fb)"
+      "8c011ca Auto-context: general (f104cfe)"
     ],
     "current_branch": "main",
     "uncommitted_changes": 1,
-    "last_updated": "2025-08-22T01:38:18.183019"
+    "last_updated": "2025-08-22T01:38:18.689867"
   },
   "recent_sessions": [
     {
@@ -75,6 +75,6 @@
       "Prefers comprehensive documentation and automation"
     ]
   },
-  "last_updated": "2025-08-22T01:38:18.183607",
+  "last_updated": "2025-08-22T01:38:18.690314",
   "evolution_stage": "Post-menu cleanup, Function Reference optimization"
 }
