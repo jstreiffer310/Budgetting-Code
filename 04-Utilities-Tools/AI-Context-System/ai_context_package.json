@@ -1,0 +1,62 @@
+{
+  "system_identity": {
+    "name": "Finance Automation V10.1",
+    "type": "Google Apps Script",
+    "purpose": "Bank email \u2192 categorized spreadsheet automation",
+    "scale": "273 functions, 11.8k lines",
+    "success_metrics": "86.4% auto-categorization, 97 ML patterns"
+  },
+  "critical_knowledge": {
+    "architecture_flow": "Gmail \u2192 _extractEmailDomain() \u2192 Bank parsers \u2192 ML categorization \u2192 Spreadsheet",
+    "data_ecosystem": {
+      "Failed_Parsing": "68 entries - parsing failure analysis",
+      "AI_Learning": "97 patterns - ML categorization training",
+      "Transactions": "22 items - processed financial data"
+    },
+    "recent_major_fixes": [
+      "Domain extraction null pointer \u2192 try-catch validation",
+      "CIBC purchase/credit confusion \u2192 priority logic reversal",
+      "Menu redundancy (3 consolidation functions \u2192 2 streamlined)"
+    ]
+  },
+  "ai_assistant_priorities": [
+    "Email parsing accuracy drives everything",
+    "Domain extraction is critical failure point",
+    "Bank-specific parsing logic varies significantly",
+    "Menu UX follows help-first philosophy",
+    "ML learning patterns feed categorization success"
+  ],
+  "common_issues": {
+    "parsing_failures": "Check _extractEmailDomain() and bank-specific parsers",
+    "categorization_errors": "Review AI_Learning patterns and ML logic",
+    "menu_confusion": "Streamlined consolidation functions, Function Reference first",
+    "performance_bottlenecks": "Currently 0 - system optimized"
+  },
+  "context_acceleration_tips": [
+    "Start with Failed_Parsing sheet to understand current issues",
+    "Review comprehensive_system_analysis.json for data relationships",
+    "Check Function Reference system for user-facing documentation",
+    "Email processing = 24 functions handling 5+ bank formats",
+    "Menu system has 6 tiers: Reference \u2192 Main \u2192 Dashboard \u2192 Transactions \u2192 Maintenance \u2192 Import \u2192 Advanced",
+    "Always use Chrome for HTML reports (user preference over VS Code Simple Browser)",
+    "Check SESSION_LOG files for detailed development history and context"
+  ],
+  "recent_session_context": {
+    "date": "2025-08-22",
+    "focus": "Menu redundancy cleanup and AI context acceleration system",
+    "changes": [
+      "Removed 3 redundant consolidation menu items",
+      "Moved Function Reference to first menu position",
+      "Created comprehensive AI context acceleration system",
+      "Organized context files into AI-Context-System subfolder"
+    ],
+    "user_preferences": [
+      "Chrome browser over VS Code Simple Browser",
+      "Detail-oriented UI feedback",
+      "Values systematic analysis before changes",
+      "Prefers comprehensive documentation and automation"
+    ]
+  },
+  "last_updated": "2025-08-22T00:48:06.537137",
+  "evolution_stage": "Post-menu cleanup, Function Reference optimization"
+}
