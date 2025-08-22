@@ -46,33 +46,23 @@
 
 const SPREADSHEET_ID = '1-eUeYMTeKoz2bIkHS8Jc2J9vO0Bnl8y6aHXmXGdJqg8';
 
-// COMPLETE SHEET STRUCTURE - All sheets the script tries to create
+// COMPLETE SHEET STRUCTURE - Matches actual My Budget (11).xlsx structure
 const SHEET_NAMES = {
-  // CORE DATA SHEETS (Essential - Always needed)
-  MAIN: 'Transactions',
-  ACCOUNTS: 'Accounts', 
-  HOLDINGS: 'Holdings',
-  DASHBOARD: 'Dashboard',
+  // CORE DATA SHEETS (5 sheets - Essential)
+  MAIN: 'Transactions',           // Primary transaction data (23 rows)
+  ACCOUNTS: 'Accounts',           // Account summaries (6 rows)  
+  HOLDINGS: 'Holdings',           // Investment holdings (3 rows)
+  DASHBOARD: 'Dashboard',         // Summary dashboard (30 rows)
+  CATEGORIES: 'Categories',       // Category definitions (0 rows)
   
-  // ANALYSIS & DEBUGGING SHEETS
-  ANALYSIS: 'System_Analysis',
-  FAILED_PARSING: 'Failed_Parsing',
-  LEARNING_HUB: 'Learning_Hub',
-  AUDIT_LOG: 'AuditLog',
-  DIAGNOSTIC_HUB: 'Diagnostic_Hub',
-  ERROR_ANALYSIS: 'Error_Analysis',
+  // SYSTEM ANALYSIS SHEET (1 sheet - ALL logging goes here)
+  ANALYSIS: 'System_Analysis',    // Consolidated system events (2 rows - will grow)
   
-  // METADATA & OUTPUT SHEETS
-  CATEGORIZATION_METADATA: 'Categorization_Metadata',
-  EXCEL_ANALYZER_OUTPUT: 'Excel_Analyzer_Output',
-  
-  // AI & LEARNING SHEETS
-  AI_LEARNING: 'AI_Learning',
-  
-  // IMPORT & PROCESSING SHEETS
-  STAGING: 'Staging',
-  CATEGORIES: 'Categories',
-  CSV_IMPORT: 'CSV_Import'
+  // PROCESSING SHEETS (3 sheets)
+  FAILED_PARSING: 'Failed_Parsing',     // Failed email parsing (68 rows)
+  CATEGORIZATION_METADATA: 'Categorization_Metadata', // Category metadata (5 rows)
+  CSV_IMPORT: 'CSV_Import',       // CSV import processing (0 rows)
+  STAGING: 'Staging'              // Temporary processing (0 rows)
 };
 
 /**
@@ -962,42 +952,18 @@ function _logPDFTrainingResults(updates, improvedCount) {
 }
 
 /**
- * Update account learning data
+ * Update account learning data - now uses existing System_Analysis sheet
  */
 function _updateAccountLearning(accountName, accountInfo) {
   try {
-    const learningSheet = _getOrCreateSheet(SHEET_NAMES.LEARNING_HUB);
-    const data = learningSheet.getDataRange().getValues();
-    
-    // Find or create account learning record
-    let accountRow = -1;
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === 'account_info' && data[i][1] === accountName) {
-        accountRow = i + 1;
-        break;
-      }
-    }
-    
     const learningData = {
-      type: 'account_info',
-      pattern: accountName,
-      metadata: JSON.stringify(accountInfo),
-      timestamp: new Date(),
+      accountName: accountName,
+      accountInfo: accountInfo,
       confidence: 1.0,
       source: 'PDF Import'
     };
     
-    if (accountRow > 0) {
-      // Update existing record
-      learningSheet.getRange(accountRow, 1, 1, 6).setValues([[
-        learningData.type, learningData.pattern, '', '', learningData.metadata, learningData.timestamp
-      ]]);
-    } else {
-      // Add new record
-      learningSheet.appendRow([
-        learningData.type, learningData.pattern, '', '', learningData.metadata, learningData.timestamp
-      ]);
-    }
+    _logSystemEvent('LEARNING', `Account learning updated: ${accountName}`, learningData);
     
   } catch (error) {
     _logError('Failed to update account learning', error);
@@ -1522,11 +1488,8 @@ function _getOrCreateSheet(sheetName, customHeaders = null) {
           case SHEET_NAMES.STAGING:
             sheet.getRange(1, 1, 1, 10).setValues([['Date', 'Amount', 'From', 'To', 'Bank', 'EmailId', 'StagedAt', 'Direction', 'Status', 'Fingerprint']]);
             break;
-          case SHEET_NAMES.AUDIT_LOG:
-            sheet.getRange(1, 1, 1, 5).setValues([['Timestamp', 'Level', 'Message', 'Context', 'User']]);
-            break;
-          case SHEET_NAMES.AI_LEARNING:
-            sheet.getRange(1, 1, 1, 10).setValues([['Timestamp', 'LearningType', 'Pattern', 'Context', 'Confidence', 'SuccessCount', 'FailureCount', 'Metadata', 'Status', 'CrossValidated']]);
+          case SHEET_NAMES.ANALYSIS:
+            sheet.getRange(1, 1, 1, 6).setValues([['Timestamp', 'Type', 'Message', 'Data', 'Action_Required', 'Status']]);
             break;
           case SHEET_NAMES.FAILED_PARSING:
             sheet.getRange(1, 1, 1, 10).setValues([['Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 'FailureReason', 'AttemptedParsers', 'AIAnalysis', 'Status', 'Priority']]);
@@ -1534,14 +1497,11 @@ function _getOrCreateSheet(sheetName, customHeaders = null) {
           case SHEET_NAMES.CSV_IMPORT:
             sheet.getRange(1, 1, 1, 5).setValues([['Date', 'Description', 'Amount', 'Source', 'Processed']]);
             break;
-          case SHEET_NAMES.DIAGNOSTIC_HUB:
-            sheet.getRange(1, 1, 1, 12).setValues([['Timestamp', 'SystemComponent', 'IssueType', 'Severity', 'Description', 'DataSample', 'RecommendedAction', 'AffectedRecords', 'Status', 'ResolvedAt', 'Category', 'TrendIndicator']]);
+          case SHEET_NAMES.ANALYSIS:
+            sheet.getRange(1, 1, 1, 6).setValues([['Timestamp', 'Type', 'Message', 'Data', 'Action_Required', 'Status']]);
             break;
-          case 'Excel_Analyzer_Output':
-            sheet.getRange(1, 1, 1, 8).setValues([['Timestamp', 'FileName', 'SheetName', 'Analysis', 'Issues', 'Recommendations', 'DataQuality', 'Status']]);
-            break;
-          case 'Error_Analysis':
-            sheet.getRange(1, 1, 1, 6).setValues([['Pattern', 'Frequency', 'Impact', 'Root Cause', 'Suggested Fix', 'Status']]);
+          case SHEET_NAMES.FAILED_PARSING:
+            sheet.getRange(1, 1, 1, 10).setValues([['Timestamp', 'EmailId', 'From', 'Subject', 'BodyPreview', 'FailureReason', 'AttemptedParsers', 'AIAnalysis', 'Status', 'Priority']]);
             break;
           default:
             sheet.getRange(1, 1, 1, 2).setValues([['Data', 'Value']]);
@@ -1908,18 +1868,15 @@ function generateStreamlinedAnalysisReport() {
       recommendation: _getSystemRecommendation(systemHealth, highSeverityIssues)
     };
     
-    // Write compact summary to Excel_Analyzer_Output for external analysis
-    const outputSheet = _getOrCreateSheet(SHEET_NAMES.EXCEL_ANALYZER_OUTPUT, [
-      'Metric', 'Value', 'Status', 'Action'
-    ]);
-    
-    outputSheet.clear();
-    outputSheet.appendRow(['Metric', 'Value', 'Status', 'Action']);
-    outputSheet.appendRow(['System Health', systemHealth, systemHealth === 'HEALTHY' ? 'Good' : 'Needs Attention', 'Monitor']);
-    outputSheet.appendRow(['Total Errors', errors, errors === 0 ? 'Good' : 'Review', errors > 0 ? 'Fix Errors' : 'None']);
-    outputSheet.appendRow(['Parsing Failures', parsingFailures, parsingFailures === 0 ? 'Good' : 'Fix', parsingFailures > 0 ? 'Fix Parsers' : 'None']);
-    outputSheet.appendRow(['Learning Events', learningEvents, 'Info', 'None']);
-    outputSheet.appendRow(['High Priority Issues', highSeverityIssues.length, highSeverityIssues.length === 0 ? 'Good' : 'Critical', highSeverityIssues.length > 0 ? 'Fix Immediately' : 'None']);
+    // Log summary to System_Analysis for Python analysis
+    _logSystemEvent('ANALYSIS_SUMMARY', `System Health: ${systemHealth}`, {
+      systemHealth: systemHealth,
+      totalErrors: errors,
+      parsingFailures: parsingFailures,
+      learningEvents: learningEvents,
+      highPriorityIssues: highSeverityIssues.length,
+      recommendation: systemHealth === 'HEALTHY' ? 'System operating normally' : 'Review required'
+    });
     
     _logInfo(`Analysis complete - System Health: ${systemHealth}`);
     return report;
@@ -2106,14 +2063,15 @@ function _backupLegacyData() {
 }
 
 function _setupStreamlinedSheets() {
-  // Ensure new sheets exist with proper headers
+  // Ensure core sheets exist with proper headers
   const analysisSheet = _getOrCreateSheet(SHEET_NAMES.ANALYSIS, [
     'Timestamp', 'Type', 'Message', 'Data', 'Action_Required', 'Status'
   ]);
   
-  const outputSheet = _getOrCreateSheet(SHEET_NAMES.EXCEL_ANALYZER_OUTPUT, [
-    'Metric', 'Value', 'Status', 'Action'
-  ]);
+  _logSystemEvent('SETUP', 'Streamlined sheets configured for Python analysis', {
+    analysisSheet: 'System_Analysis',
+    purpose: 'Centralized logging for Python analyzer'
+  });
   
   return 'Streamlined sheets created successfully';
 }
@@ -2211,28 +2169,22 @@ function _logWarning(message, context = {}) {
   _auditLog('WARNING', message, context);
 }
 
-function _auditLog(level, message, context = {}) {
+/**
+ * 📝 CONSOLIDATED SYSTEM LOGGING - Uses existing System_Analysis sheet
+ * Replaces AuditLog, Learning_Hub, and AI_Learning with unified System_Analysis logging
+ */
+function _systemLog(type, level, message, details = {}) {
   try {
-    const ss = _ss();
-    let auditSheet = ss.getSheetByName(SHEET_NAMES.AUDIT_LOG);
-    if (!auditSheet) {
-      auditSheet = ss.insertSheet(SHEET_NAMES.AUDIT_LOG);
-      auditSheet.appendRow(['Timestamp', 'Level', 'Message', 'Context', 'User']);
-      auditSheet.getRange(1, 1, 1, 5).setFontWeight('bold');
-    }
-    
-    const timestamp = new Date();
-    const safeLevel = String(level || 'INFO').trim() || 'INFO';
-    const safeMessage = String(message || 'No message').trim() || 'No message';
-    const safeContext = JSON.stringify(context || {});
-    const safeUser = Session.getActiveUser().getEmail() || 'Unknown User';
-    
-    if (timestamp && safeLevel && safeMessage) {
-      auditSheet.appendRow([timestamp, safeLevel, safeMessage, safeContext, safeUser]);
-    }
+    // Use existing System_Analysis sheet instead of creating new ones
+    _logSystemEvent(type.toUpperCase(), `${level}: ${message}`, details);
   } catch (error) {
-    console.error('Audit logging failed:', error);
+    console.error('System logging failed:', error);
   }
+}
+
+// Legacy audit logging function - now uses existing System_Analysis
+function _auditLog(level, message, context = {}) {
+  _logSystemEvent('AUDIT', `${level}: ${message}`, context);
 }
 
 function _safeExecute(func, context, retries = CONFIG.MAX_PROCESSING_ATTEMPTS) {
@@ -2254,10 +2206,10 @@ function generateErrorAnalysisReport() {
     _logInfo('Generating comprehensive error analysis report...');
     
     const ss = _ss();
-    const auditSheet = ss.getSheetByName(SHEET_NAMES.AUDIT_LOG);
+    const systemAnalysisSheet = ss.getSheetByName(SHEET_NAMES.ANALYSIS);
     const failedSheet = ss.getSheetByName(SHEET_NAMES.FAILED_PARSING);
     
-    if (!auditSheet && !failedSheet) {
+    if (!systemAnalysisSheet && !failedSheet) {
       _logWarning('No error logs found for analysis');
       return;
     }
@@ -4019,58 +3971,27 @@ const LEARNING_TYPES = {
 /**
  * Unified learning record structure
  */
+/**
+ * Record AI learning data - now uses existing System_Analysis sheet
+ */
 function _recordLearning(type, pattern, context, confidence, metadata = {}) {
   if (!CONFIG.LEARNING_ENABLED) return;
   
   try {
-    const ss = _ss();
-    let aiLearningSheet = ss.getSheetByName(SHEET_NAMES.AI_LEARNING);
+    const learningData = {
+      learningType: type,
+      pattern: pattern,
+      context: context.substring(0, 200),
+      confidence: confidence,
+      metadata: metadata
+    };
     
-    if (!aiLearningSheet) {
-      aiLearningSheet = ss.insertSheet(SHEET_NAMES.AI_LEARNING);
-      aiLearningSheet.appendRow([
-        'Timestamp', 'LearningType', 'Pattern', 'Context', 'Confidence', 
-        'SuccessCount', 'FailureCount', 'Metadata', 'Status', 'CrossValidated'
-      ]);
-    }
+    _logSystemEvent('AI_LEARNING', `Learning recorded: ${type} - ${pattern}`, learningData);
     
-    // Check if pattern already exists
-    const data = aiLearningSheet.getDataRange().getValues();
-    let existingRow = -1;
-    
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][1] === type && data[i][2] === pattern) {
-        existingRow = i + 1;
-        break;
-      }
-    }
-    
-    if (existingRow > 0) {
-      // Update existing pattern
-      const currentSuccess = parseInt(aiLearningSheet.getRange(existingRow, 6).getValue()) || 0;
-      const currentFailure = parseInt(aiLearningSheet.getRange(existingRow, 7).getValue()) || 0;
-      const totalUsage = currentSuccess + currentFailure + 1;
-      const newConfidence = ((currentSuccess + 1) / totalUsage) * confidence;
-      
-      aiLearningSheet.getRange(existingRow, 1).setValue(new Date()); // Timestamp
-      aiLearningSheet.getRange(existingRow, 5).setValue(newConfidence); // Confidence
-      aiLearningSheet.getRange(existingRow, 6).setValue(currentSuccess + 1); // Success count
-      aiLearningSheet.getRange(existingRow, 8).setValue(JSON.stringify(metadata)); // Metadata
-    } else {
-      // Add new pattern
-      aiLearningSheet.appendRow([
-        new Date(),
-        type,
-        pattern,
-        context.substring(0, 200),
-        confidence,
-        1, // Success count
-        0, // Failure count
-        JSON.stringify(metadata),
-        'ACTIVE',
-        false // Cross validated
-      ]);
-    }
+  } catch (error) {
+    _logError('Failed to record AI learning', error);
+  }
+}
     
   } catch (error) {
     _logError('Failed to record AI learning', error);
@@ -10746,7 +10667,7 @@ function showAdvancedToolsMenu() {
 function _getSheetStatus(sheetName) {
   const essential = [SHEET_NAMES.MAIN, SHEET_NAMES.ACCOUNTS, SHEET_NAMES.CATEGORIES, SHEET_NAMES.DASHBOARD];
   const optional = [SHEET_NAMES.HOLDINGS, SHEET_NAMES.STAGING, SHEET_NAMES.CSV_IMPORT];
-  const deletable = ['NetWorthHistory', SHEET_NAMES.LEARNING_HUB, SHEET_NAMES.FAILED_PARSING, SHEET_NAMES.AUDIT_LOG];
+  const deletable = ['NetWorthHistory', SHEET_NAMES.FAILED_PARSING];
   
   if (essential.includes(sheetName)) return '🟢';
   if (optional.includes(sheetName)) return '🟡';
@@ -10772,7 +10693,7 @@ function cleanupLegacySheets() {
   // Only delete if Diagnostic_Hub exists (meaning system is upgraded)
   const diagnosticHub = ss.getSheetByName('Diagnostic_Hub');
   if (diagnosticHub) {
-    safeToDelete.push('Learning_Hub', 'Failed_Parsing', 'AuditLog');
+    safeToDelete.push('Failed_Parsing');
   }
   
   for (const sheet of sheets) {
@@ -11093,6 +11014,7 @@ function showStreamlinedAnalysisMenu() {
 
 💡 HOW IT WORKS:
 Instead of multiple confusing sheets (AuditLog, Failed_Parsing, Learning_Hub, etc.),
+now everything goes to the existing System_Analysis sheet with proper categorization.
 the new system uses just TWO sheets:
 
 • System_Analysis: All events in one place
