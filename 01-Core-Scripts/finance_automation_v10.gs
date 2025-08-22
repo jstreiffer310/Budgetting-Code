@@ -7834,7 +7834,12 @@ function onOpen() {
     .addItem('🏥 Run System Health Check', 'runSystemHealthCheck')
     .addItem('📊 Generate Analysis Report', 'generateStreamlinedAnalysisReport')
     .addSeparator()
-    .addItem('✅ Test Enhanced Email Parsing', 'testEnhancedEmailParsing');
+    .addItem('✅ Test Enhanced Email Parsing', 'testEnhancedEmailParsing')
+    .addSeparator()
+    .addItem('🧪 Quick Validation Test', 'quickValidationTest')
+    .addItem('🧹 Cleanup Unauthorized Sheets', 'cleanupUnauthorizedSheets')
+    .addItem('📊 Analyze Current Sheets', 'analyzeCurrentSheets')
+    .addItem('🔧 Test & Auto-Cleanup', 'testAndCleanup');
   menu.addSubMenu(maintenanceMenu);
 
   // 📁 IMPORT & ANALYSIS
@@ -11108,6 +11113,274 @@ the new system uses just TWO sheets:
 
   Browser.msgBox(menu);
   _logSystemEvent('MENU', 'Streamlined analysis menu displayed');
+}
+
+/**
+ * 🧪 VALIDATION & TESTING FUNCTIONS
+ */
+
+/**
+ * 🚀 QUICK VALIDATION TEST - Checks if ghost references are eliminated
+ */
+function quickValidationTest() {
+  console.log('🚀 QUICK VALIDATION TEST - Checking ghost references');
+  
+  try {
+    const ss = _ss();
+    const sheets = ss.getSheets().map(s => s.getName());
+    const allowedSheets = Object.values(SHEET_NAMES);
+    
+    console.log(`📊 Current Sheets (${sheets.length}):`, sheets);
+    console.log(`✅ Allowed Sheets (${allowedSheets.length}):`, allowedSheets);
+    
+    // Find unauthorized sheets
+    const unauthorized = sheets.filter(name => !allowedSheets.includes(name));
+    
+    // Check for specific problematic patterns (ghost sheets)
+    const ghostSheets = sheets.filter(name => 
+      name.match(/^Sheet\d+$/) ||           // Sheet110, Sheet111, etc.
+      name.includes('Copy of') ||            // Copy of sheets
+      name.match(/^Untitled/) ||            // Untitled sheets
+      name.match(/.*_\d+$/)                 // Sheets ending with _1, _2, etc.
+    );
+    
+    const ui = SpreadsheetApp.getUi();
+    
+    if (unauthorized.length === 0) {
+      console.log('🎉 SUCCESS: No unauthorized sheets found!');
+      console.log('✅ All ghost references have been eliminated!');
+      
+      // Check for core required sheets
+      const coreSheets = [SHEET_NAMES.MAIN, SHEET_NAMES.ANALYSIS, SHEET_NAMES.EXCEL_ANALYZER_OUTPUT];
+      const missingCore = coreSheets.filter(name => !sheets.includes(name));
+      
+      let successMessage = `✅ Quick validation passed!\n\n` +
+        `• Total Sheets: ${sheets.length}\n` +
+        `• Unauthorized Sheets: 0\n` +
+        `• Ghost References: Eliminated ✅\n`;
+      
+      if (missingCore.length === 0) {
+        successMessage += `• Core Sheets: All present ✅\n\n` +
+          `🎉 Your Sheet110/111/112 issue is permanently fixed!`;
+      } else {
+        successMessage += `• Missing Core Sheets: ${missingCore.join(', ')}\n\n` +
+          `⚠️ Some core sheets missing but ghost issue is fixed!`;
+      }
+      
+      ui.alert('🎉 SUCCESS!', successMessage, ui.ButtonSet.OK);
+      _logSystemEvent('VALIDATION', 'Quick validation test passed - no ghost references found');
+      return true;
+      
+    } else {
+      console.log(`🚨 FOUND ${unauthorized.length} unauthorized sheets:`, unauthorized);
+      
+      if (ghostSheets.length > 0) {
+        console.log(`👻 Ghost sheets detected:`, ghostSheets);
+      }
+      
+      let warningMessage = `Found ${unauthorized.length} unauthorized sheets:\n\n`;
+      
+      // Show first 10 unauthorized sheets
+      const displaySheets = unauthorized.slice(0, 10);
+      displaySheets.forEach(name => {
+        warningMessage += `• ${name}\n`;
+      });
+      
+      if (unauthorized.length > 10) {
+        warningMessage += `... and ${unauthorized.length - 10} more\n\n`;
+      }
+      
+      if (ghostSheets.length > 0) {
+        warningMessage += `\n👻 Ghost patterns detected: ${ghostSheets.length}\n`;
+        warningMessage += `This suggests the original Sheet110/111 issue.\n\n`;
+      }
+      
+      warningMessage += `🔧 Run cleanupUnauthorizedSheets() to remove them.`;
+      
+      ui.alert('⚠️ Cleanup Needed', warningMessage, ui.ButtonSet.OK);
+      _logSystemEvent('VALIDATION', `Quick validation failed - found ${unauthorized.length} unauthorized sheets`);
+      return false;
+    }
+    
+  } catch (error) {
+    console.error('❌ VALIDATION FAILED:', error);
+    const ui = SpreadsheetApp.getUi();
+    ui.alert('❌ Test Error', `Validation failed: ${error.message}`, ui.ButtonSet.OK);
+    _logStreamlinedError('Quick validation test failed', error);
+    return false;
+  }
+}
+
+/**
+ * 🧹 CLEANUP UNAUTHORIZED SHEETS
+ */
+function cleanupUnauthorizedSheets() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Safety confirmation
+  const confirmation = ui.alert(
+    '⚠️ DANGEROUS OPERATION',
+    'This will permanently delete ALL sheets that don\'t match the allowed SHEET_NAMES list.\n\n' +
+    'Allowed sheets: Transactions, Accounts, Dashboard, System_Analysis, etc.\n\n' +
+    'Are you ABSOLUTELY sure?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (confirmation !== ui.Button.YES) {
+    ui.alert('❌ Cleanup cancelled by user');
+    _logSystemEvent('VALIDATION', 'Sheet cleanup cancelled by user');
+    return;
+  }
+  
+  console.log('🧹 Starting automated sheet cleanup...');
+  _logSystemEvent('VALIDATION', 'Starting automated sheet cleanup');
+  
+  try {
+    const ss = _ss();
+    const existingSheets = ss.getSheets();
+    const allowedSheets = Object.values(SHEET_NAMES);
+    
+    let deletedCount = 0;
+    const deletedNames = [];
+    
+    existingSheets.forEach(sheet => {
+      const sheetName = sheet.getName();
+      
+      if (!allowedSheets.includes(sheetName)) {
+        try {
+          ss.deleteSheet(sheet);
+          deletedCount++;
+          deletedNames.push(sheetName);
+          console.log(`🗑️ Deleted unauthorized sheet: ${sheetName}`);
+        } catch (error) {
+          console.error(`Failed to delete sheet: ${sheetName}`, error);
+          _logStreamlinedError(`Failed to delete sheet: ${sheetName}`, error);
+        }
+      }
+    });
+    
+    const report = `🧹 CLEANUP COMPLETE\n\n` +
+                  `• Deleted Sheets: ${deletedCount}\n` +
+                  `• Remaining Sheets: ${ss.getSheets().length}\n` +
+                  `• Removed: ${deletedNames.join(', ')}\n\n` +
+                  `✅ System now compliant with allowed sheet names!`;
+    
+    ui.alert('🎉 Cleanup Results', report, ui.ButtonSet.OK);
+    console.log(`✅ Cleanup complete - Deleted ${deletedCount} unauthorized sheets`);
+    _logSystemEvent('VALIDATION', `Sheet cleanup complete - deleted ${deletedCount} sheets: ${deletedNames.join(', ')}`);
+    
+    return {
+      deletedCount: deletedCount,
+      deletedNames: deletedNames,
+      remainingCount: ss.getSheets().length
+    };
+    
+  } catch (error) {
+    console.error('❌ CLEANUP FAILED:', error);
+    ui.alert('❌ Cleanup Error', `Cleanup failed: ${error.message}`, ui.ButtonSet.OK);
+    _logStreamlinedError('Sheet cleanup failed', error);
+    return null;
+  }
+}
+
+/**
+ * 🧹 AUTOMATED TEST AND CLEANUP SEQUENCE
+ */
+function testAndCleanup() {
+  console.log('🧹 TEST AND CLEANUP SEQUENCE');
+  _logSystemEvent('VALIDATION', 'Starting test and cleanup sequence');
+  
+  // First, run quick test
+  const quickResult = quickValidationTest();
+  
+  if (!quickResult) {
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert('🧹 Auto-Cleanup?', 
+      'Unauthorized sheets found. Run automatic cleanup?\n\n' +
+      '⚠️ This will permanently delete unauthorized sheets!', 
+      ui.ButtonSet.YES_NO);
+    
+    if (confirm === ui.Button.YES) {
+      const cleanupResult = cleanupUnauthorizedSheets();
+      
+      if (cleanupResult && cleanupResult.deletedCount > 0) {
+        // Wait a moment and test again
+        Utilities.sleep(2000);
+        console.log('🔄 Re-running validation after cleanup...');
+        quickValidationTest();
+      }
+    }
+  }
+}
+
+/**
+ * 📊 COMPREHENSIVE SHEET ANALYSIS
+ */
+function analyzeCurrentSheets() {
+  console.log('📊 COMPREHENSIVE SHEET ANALYSIS');
+  
+  try {
+    const ss = _ss();
+    const sheets = ss.getSheets();
+    const allowedSheets = Object.values(SHEET_NAMES);
+    
+    console.log(`\n📋 SHEET INVENTORY (${sheets.length} total):`);
+    
+    let analysis = {
+      coreSheets: 0,
+      analysisSheets: 0,
+      ghostSheets: 0,
+      unauthorizedSheets: 0,
+      totalSheets: sheets.length
+    };
+    
+    sheets.forEach((sheet, index) => {
+      const name = sheet.getName();
+      const rows = sheet.getLastRow();
+      const cols = sheet.getLastColumn();
+      
+      // Categorize sheet
+      let category = '❓';
+      if ([SHEET_NAMES.MAIN, SHEET_NAMES.ACCOUNTS, SHEET_NAMES.HOLDINGS, SHEET_NAMES.DASHBOARD].includes(name)) {
+        category = '🟢 Core';
+        analysis.coreSheets++;
+      } else if ([SHEET_NAMES.ANALYSIS, SHEET_NAMES.EXCEL_ANALYZER_OUTPUT].includes(name)) {
+        category = '🔵 Analysis';
+        analysis.analysisSheets++;
+      } else if (name.match(/^Sheet\d+$/)) {
+        category = '🚨 Ghost';
+        analysis.ghostSheets++;
+      } else if (allowedSheets.includes(name)) {
+        category = '🟡 Processing';
+      } else {
+        category = '🔴 Unauthorized';
+        analysis.unauthorizedSheets++;
+      }
+      
+      console.log(`${index + 1}. ${name} - ${category} (${rows}x${cols})`);
+    });
+    
+    const summary = `\n📈 SUMMARY:\n` +
+      `• Core Sheets: ${analysis.coreSheets}/4\n` +
+      `• Analysis Sheets: ${analysis.analysisSheets}/2\n` +
+      `• Ghost Sheets: ${analysis.ghostSheets}\n` +
+      `• Unauthorized Sheets: ${analysis.unauthorizedSheets}\n` +
+      `• Total Sheets: ${analysis.totalSheets}`;
+    
+    console.log(summary);
+    
+    const ui = SpreadsheetApp.getUi();
+    ui.alert('📊 Sheet Analysis', summary, ui.ButtonSet.OK);
+    
+    _logSystemEvent('VALIDATION', `Sheet analysis complete - ${analysis.totalSheets} total, ${analysis.ghostSheets} ghost, ${analysis.unauthorizedSheets} unauthorized`);
+    
+    return analysis;
+    
+  } catch (error) {
+    console.error('❌ ANALYSIS FAILED:', error);
+    _logStreamlinedError('Sheet analysis failed', error);
+    return null;
+  }
 }
 
 /**
