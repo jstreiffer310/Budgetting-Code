@@ -7925,7 +7925,19 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   const menu = ui.createMenu('💰 Finance Automation V10.1');
 
-  // 🚀 MAIN ACTIONS - Core functionality
+  // � FUNCTION REFERENCE - Help and documentation (First for easy access)
+  const referenceMenu = ui.createMenu('📖 Function Reference')
+    .addItem('📋 Show All Functions', 'showFunctionReference')
+    .addItem('🚀 Core Functions Guide', 'showCoreFunctionsGuide')
+    .addItem('📧 Email Processing Guide', 'showEmailProcessingGuide')
+    .addItem('🧠 Learning System Guide', 'showLearningSystemGuide')
+    .addItem('📊 Analysis Tools Guide', 'showAnalysisToolsGuide')
+    .addSeparator()
+    .addItem('❓ Quick Help', 'showQuickHelp');
+  menu.addSubMenu(referenceMenu);
+  menu.addSeparator();
+
+  // �🚀 MAIN ACTIONS - Core functionality
   menu.addItem('🚀 Run Full Automation', 'runFullAutomation');
   menu.addItem('⚡ Quick Setup', 'quickSetup');
   menu.addSeparator();
@@ -7994,17 +8006,6 @@ function onOpen() {
     .addItem('🔍 Diagnostic Category Analysis', 'diagnosticCategoryLearning')
     .addItem('🧠 Force Learn Categories', 'forceLearnCategoriesLowThreshold');
   menu.addSubMenu(advancedMenu);
-
-  // 📖 FUNCTION REFERENCE - Help and documentation
-  const referenceMenu = ui.createMenu('📖 Function Reference')
-    .addItem('📋 Show All Functions', 'showFunctionReference')
-    .addItem('🚀 Core Functions Guide', 'showCoreFunctionsGuide')
-    .addItem('📧 Email Processing Guide', 'showEmailProcessingGuide')
-    .addItem('🧠 Learning System Guide', 'showLearningSystemGuide')
-    .addItem('📊 Analysis Tools Guide', 'showAnalysisToolsGuide')
-    .addSeparator()
-    .addItem('❓ Quick Help', 'showQuickHelp');
-  menu.addSubMenu(referenceMenu);
 
   menu.addToUi();
 }
