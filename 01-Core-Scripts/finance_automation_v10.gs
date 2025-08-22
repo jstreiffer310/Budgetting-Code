@@ -46,7 +46,7 @@
 
 const SPREADSHEET_ID = '1-eUeYMTeKoz2bIkHS8Jc2J9vO0Bnl8y6aHXmXGdJqg8';
 
-// STREAMLINED SHEET STRUCTURE - Simplified for efficiency
+// COMPLETE SHEET STRUCTURE - All sheets the script tries to create
 const SHEET_NAMES = {
   // CORE DATA SHEETS (Essential - Always needed)
   MAIN: 'Transactions',
@@ -54,14 +54,40 @@ const SHEET_NAMES = {
   HOLDINGS: 'Holdings',
   DASHBOARD: 'Dashboard',
   
-  // ANALYSIS & DEBUGGING (Single consolidated sheet)
-  ANALYSIS: 'System_Analysis',  // Replaces: AuditLog, Failed_Parsing, Learning_Hub, Diagnostic_Hub
+  // ANALYSIS & DEBUGGING SHEETS
+  ANALYSIS: 'System_Analysis',
+  FAILED_PARSING: 'Failed_Parsing',
+  LEARNING_HUB: 'Learning_Hub',
+  AUDIT_LOG: 'AuditLog',
+  DIAGNOSTIC_HUB: 'Diagnostic_Hub',
+  ERROR_ANALYSIS: 'Error_Analysis',
   
-  // LEGACY SHEETS (Marked for cleanup)
-  STAGING: 'Staging',          // TO BE REMOVED - integrate into main flow
-  CATEGORIES: 'Categories',    // TO BE REMOVED - integrate into analysis
-  CSV_IMPORT: 'CSV_Import'     // TO BE REMOVED - use direct processing
+  // METADATA & OUTPUT SHEETS
+  CATEGORIZATION_METADATA: 'Categorization_Metadata',
+  EXCEL_ANALYZER_OUTPUT: 'Excel_Analyzer_Output',
+  
+  // AI & LEARNING SHEETS
+  AI_LEARNING: 'AI_Learning',
+  
+  // IMPORT & PROCESSING SHEETS
+  STAGING: 'Staging',
+  CATEGORIES: 'Categories',
+  CSV_IMPORT: 'CSV_Import'
 };
+
+/**
+ * CRITICAL: Validate that we only use predefined sheet names
+ * This prevents the creation of "Sheet110", "Sheet111" etc.
+ */
+function validateSheetName(requestedName) {
+  const allowedNames = Object.values(SHEET_NAMES);
+  if (!allowedNames.includes(requestedName)) {
+    console.error(`❌ INVALID SHEET NAME: "${requestedName}"`);
+    console.error(`✅ Allowed names: ${allowedNames.join(', ')}`);
+    return false;
+  }
+  return true;
+}
 
 // Column mappings (based on live data structure)
 const COLUMNS = {
@@ -940,7 +966,7 @@ function _logPDFTrainingResults(updates, improvedCount) {
  */
 function _updateAccountLearning(accountName, accountInfo) {
   try {
-    const learningSheet = _getOrCreateSheet('Learning_Hub');
+    const learningSheet = _getOrCreateSheet(SHEET_NAMES.LEARNING_HUB);
     const data = learningSheet.getDataRange().getValues();
     
     // Find or create account learning record
@@ -1308,7 +1334,7 @@ function batchImportFiles(files, defaultAccount = 'Imported Account') {
  * UI function to test and demonstrate import capabilities
  */
 function testImportSystem() {
-  const dashboard = _getOrCreateSheet('Dashboard');
+  const dashboard = _getOrCreateSheet(SHEET_NAMES.DASHBOARD);
   const now = new Date();
   
   // Add import status section to dashboard
@@ -1446,7 +1472,32 @@ function _getOrCreateSheet(sheetName, customHeaders = null) {
     let sheet = spreadsheet.getSheetByName(sheetName);
     
     if (!sheet) {
-      console.log(`Creating new sheet: ${sheetName}`);
+      // CRITICAL SAFETY CHECK: Only allow predefined sheet names
+      const allowedSheetNames = Object.values(SHEET_NAMES);
+      
+      if (!allowedSheetNames.includes(sheetName)) {
+        console.error(`❌ BLOCKED: Attempted to create unauthorized sheet: "${sheetName}"`);
+        console.error(`✅ Allowed sheets: ${allowedSheetNames.join(', ')}`);
+        
+        // Return existing sheet instead of creating invalid one
+        console.log(`🔄 Using fallback sheet: ${SHEET_NAMES.ANALYSIS}`);
+        return spreadsheet.getSheetByName(SHEET_NAMES.ANALYSIS) || spreadsheet.getSheets()[0];
+      }
+      
+      // Additional safety checks
+      if (!sheetName || sheetName.trim() === '' || sheetName === 'undefined') {
+        console.error(`❌ Invalid sheet name: "${sheetName}" - using fallback`);
+        return spreadsheet.getSheetByName(SHEET_NAMES.ANALYSIS) || spreadsheet.getSheets()[0];
+      }
+      
+      // Check sheet count limit
+      const allSheets = spreadsheet.getSheets();
+      if (allSheets.length >= 20) {
+        console.error(`❌ Too many sheets (${allSheets.length}) - using existing sheet`);
+        return spreadsheet.getSheetByName(SHEET_NAMES.ANALYSIS) || spreadsheet.getSheets()[0];
+      }
+      
+      console.log(`✅ Creating authorized sheet: ${sheetName}`);
       sheet = spreadsheet.insertSheet(sheetName);
       
       // Use custom headers if provided, otherwise use predefined headers
@@ -1684,7 +1735,7 @@ function _preprocessEmailSubject(subject) {
  */
 function _logSystemEvent(type, message, data = {}, actionRequired = 'None') {
   try {
-    const analysisSheet = _getOrCreateSheet('System_Analysis', [
+    const analysisSheet = _getOrCreateSheet(SHEET_NAMES.ANALYSIS, [
       'Timestamp', 'Type', 'Message', 'Data', 'Action_Required', 'Status'
     ]);
     
@@ -1789,7 +1840,7 @@ function generateStreamlinedAnalysisReport() {
     _logInfo('Generating streamlined analysis report for Excel Analyzer...');
     
     const ss = _ss();
-    const analysisSheet = ss.getSheetByName('System_Analysis');
+    const analysisSheet = ss.getSheetByName(SHEET_NAMES.ANALYSIS);
     
     if (!analysisSheet || analysisSheet.getLastRow() < 2) {
       return {
@@ -1858,7 +1909,7 @@ function generateStreamlinedAnalysisReport() {
     };
     
     // Write compact summary to Excel_Analyzer_Output for external analysis
-    const outputSheet = _getOrCreateSheet('Excel_Analyzer_Output', [
+    const outputSheet = _getOrCreateSheet(SHEET_NAMES.EXCEL_ANALYZER_OUTPUT, [
       'Metric', 'Value', 'Status', 'Action'
     ]);
     
@@ -2056,11 +2107,11 @@ function _backupLegacyData() {
 
 function _setupStreamlinedSheets() {
   // Ensure new sheets exist with proper headers
-  const analysisSheet = _getOrCreateSheet('System_Analysis', [
+  const analysisSheet = _getOrCreateSheet(SHEET_NAMES.ANALYSIS, [
     'Timestamp', 'Type', 'Message', 'Data', 'Action_Required', 'Status'
   ]);
   
-  const outputSheet = _getOrCreateSheet('Excel_Analyzer_Output', [
+  const outputSheet = _getOrCreateSheet(SHEET_NAMES.EXCEL_ANALYZER_OUTPUT, [
     'Metric', 'Value', 'Status', 'Action'
   ]);
   
@@ -2579,7 +2630,7 @@ function _generateUnifiedInsights(analysis) {
 function _createExcelAnalyzerOutput(insights) {
   try {
     const ss = _ss();
-    const outputSheet = _getOrCreateSheet('Excel_Analyzer_Output', [
+    const outputSheet = _getOrCreateSheet(SHEET_NAMES.EXCEL_ANALYZER_OUTPUT, [
       'Metric', 'Value', 'Trend', 'Status', 'Recommendation', 'LastUpdated'
     ]);
     
@@ -5746,7 +5797,7 @@ function sortAllTransactions() {
  */
 function getTransactionOrderStats() {
   try {
-    const transactionSheet = _getOrCreateSheet('Transactions');
+    const transactionSheet = _getOrCreateSheet(SHEET_NAMES.MAIN);
     const data = transactionSheet.getDataRange().getValues();
     
     if (data.length <= 1) {
@@ -5873,7 +5924,7 @@ function _commitTransaction(transaction, mainSheet, accountsSheet, useHistorical
  */
 function _sortTransactionsByDate(sheet = null) {
   try {
-    const transactionSheet = sheet || _getOrCreateSheet('Transactions');
+    const transactionSheet = sheet || _getOrCreateSheet(SHEET_NAMES.MAIN);
     const data = transactionSheet.getDataRange().getValues();
     
     if (data.length <= 1) return; // Only header or empty
@@ -5917,7 +5968,7 @@ function _sortTransactionsByDate(sheet = null) {
  */
 function _addTransactionToSheet(transaction, accountName) {
   try {
-    const transactionSheet = _getOrCreateSheet('Transactions');
+    const transactionSheet = _getOrCreateSheet(SHEET_NAMES.MAIN);
     
     // Prepare transaction row with proper date handling
     const transactionDate = transaction.date instanceof Date ? transaction.date : new Date(transaction.date);
@@ -6681,7 +6732,7 @@ function validateCategorizationAgainstPDFTraining() {
     
     const ss = _ss();
     const metadataSheet = ss.getSheetByName('Categorization_Metadata');
-    const analysisSheet = _getOrCreateSheet('PDF_Categorization_Analysis', [
+    const analysisSheet = _getOrCreateSheet(SHEET_NAMES.ANALYSIS, [
       'Merchant', 'Main_Script_Category', 'PDF_Training_Category', 'Agreement', 
       'Main_Confidence', 'PDF_Confidence', 'Recommendation', 'Transaction_Count'
     ]);
@@ -7750,55 +7801,67 @@ function _writeDashboardSummary(dashboardSheet, summary) {
 
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  const menu = ui.createMenu('💰 Finance Automation');
+  const menu = ui.createMenu('💰 Finance Automation V10.1');
 
-  // Main Actions
+  // 🚀 MAIN ACTIONS - Core functionality
   menu.addItem('🚀 Run Full Automation', 'runFullAutomation');
   menu.addItem('⚡ Quick Setup', 'quickSetup');
   menu.addSeparator();
 
-  // Manual Updates
-  const manualUpdatesMenu = ui.createMenu('📊 Manual Updates')
+  // 📊 DASHBOARD & UPDATES
+  const dashboardMenu = ui.createMenu('📊 Dashboard & Updates')
+    .addItem('📊 Update Dashboard', 'updateDashboard')
     .addItem('🔄 Refresh Holdings', 'refreshHoldings')
     .addItem('📈 Update Net Worth', 'updateNetWorth')
-    .addItem('� Update Dashboard', 'updateDashboard')
-    .addItem('� Initialize Holdings Data', 'initializeHoldingsData');
-  menu.addSubMenu(manualUpdatesMenu);
+    .addItem('📋 Initialize Holdings Data', 'initializeHoldingsData');
+  menu.addSubMenu(dashboardMenu);
 
-  // Transaction Management
-  const transactionToolsMenu = ui.createMenu('💳 Transaction Tools')
+  // 💳 TRANSACTION PROCESSING - Core transaction functions
+  const transactionMenu = ui.createMenu('💳 Transaction Processing')
     .addItem('📧 Process New Emails', 'processNewEmails')
     .addItem('🤝 Pair Staged Transfers', 'pairStagedTransfers')
     .addItem('🧹 Cleanup Stale Transactions', 'cleanupStaleTransactions')
-    .addItem('🔍 Review Pending', 'reviewPendingTransactions')
-    .addItem('📚 Learn Categories', 'learnCategoriesFromTransactions')
     .addSeparator()
+    .addItem('📚 Learn Categories', 'learnCategoriesFromTransactions')
     .addItem('🎯 Apply PDF Training Data', 'applyPDFTrainingToExistingTransactions')
     .addSeparator()
-    .addItem('📑 Sort All Transactions', 'sortAllTransactions')
-    .addItem('📊 Transaction Order Stats', 'getTransactionOrderStats');
-  menu.addSubMenu(transactionToolsMenu);
+    .addItem('📑 Sort All Transactions', 'sortAllTransactions');
+  menu.addSubMenu(transactionMenu);
 
-  // Import Tools
-  const importMenu = ui.createMenu('📁 Import & Processing')
+  // 🔧 SYSTEM MAINTENANCE - Critical functions
+  const maintenanceMenu = ui.createMenu('🔧 System Maintenance')
+    .addItem('🧹 Remove Duplicate Transactions', 'removeDuplicateTransactions')
+    .addItem('🏥 Run System Health Check', 'runSystemHealthCheck')
+    .addItem('📊 Generate Analysis Report', 'generateStreamlinedAnalysisReport')
+    .addSeparator()
+    .addItem('✅ Test Enhanced Email Parsing', 'testEnhancedEmailParsing');
+  menu.addSubMenu(maintenanceMenu);
+
+  // 📁 IMPORT & ANALYSIS
+  const importMenu = ui.createMenu('📁 Import & Analysis')
     .addItem('📄 Test Import System', 'testImportSystem')
     .addSeparator()
-    .addItem('ℹ️  CSV Import Info', 'showCSVImportInfo')
-    .addItem('ℹ️  PDF Import Info', 'showPDFImportInfo');
+    .addItem('ℹ️ CSV Import Info', 'showCSVImportInfo')
+    .addItem('ℹ️ PDF Import Info', 'showPDFImportInfo')
+    .addSeparator()
+    .addItem('📊 Transaction Order Stats', 'getTransactionOrderStats');
   menu.addSubMenu(importMenu);
   
-  // Testing & Debugging
-  const debugMenu = ui.createMenu('🧪 Debug & Testing')
+  // 🧪 ADVANCED TOOLS - For debugging and testing
+  const advancedMenu = ui.createMenu('🧪 Advanced Tools')
     .addItem('📋 Show Configuration', 'showConfiguration')
     .addItem('🧪 Test Email Parsing', 'testEmailParsing')
-    .addItem('💰 Test PayPal Processing', 'testPayPalProcessing')
+    .addItem('� Review Pending Transactions', 'reviewPendingTransactions')
+    .addSeparator()
+    .addItem('�💰 Test PayPal Processing', 'testPayPalProcessing')
+    .addItem('💳 Debug PayPal Emails', 'debugPayPalEmails')
+    .addSeparator()
     .addItem('🧠 Test Historical Categorization', 'testHistoricalCategorization')
     .addItem('🔗 Test Historical Integration', 'testHistoricalIntegration')
     .addSeparator()
     .addItem('🔍 Diagnostic Category Analysis', 'diagnosticCategoryLearning')
-    .addItem('💳 Debug PayPal Emails', 'debugPayPalEmails')
-    .addItem('🚀 Force Learn Categories (Low Threshold)', 'forceLearnCategoriesLowThreshold');
-  menu.addSubMenu(debugMenu);
+    .addItem('🧠 Force Learn Categories', 'forceLearnCategoriesLowThreshold');
+  menu.addSubMenu(advancedMenu);
 
   menu.addToUi();
 }
@@ -10676,9 +10739,9 @@ function showAdvancedToolsMenu() {
  * Get status indicator for sheet
  */
 function _getSheetStatus(sheetName) {
-  const essential = ['Transactions', 'Accounts', 'Categories', 'Dashboard'];
-  const optional = ['Holdings', 'Staging', 'CSV_Import'];
-  const deletable = ['NetWorthHistory', 'Learning_Hub', 'Failed_Parsing', 'AuditLog'];
+  const essential = [SHEET_NAMES.MAIN, SHEET_NAMES.ACCOUNTS, SHEET_NAMES.CATEGORIES, SHEET_NAMES.DASHBOARD];
+  const optional = [SHEET_NAMES.HOLDINGS, SHEET_NAMES.STAGING, SHEET_NAMES.CSV_IMPORT];
+  const deletable = ['NetWorthHistory', SHEET_NAMES.LEARNING_HUB, SHEET_NAMES.FAILED_PARSING, SHEET_NAMES.AUDIT_LOG];
   
   if (essential.includes(sheetName)) return '🟢';
   if (optional.includes(sheetName)) return '🟡';
@@ -10736,7 +10799,7 @@ function removeDuplicateTransactions() {
   
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const mainSheet = ss.getSheetByName('Transactions');
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
     const data = mainSheet.getDataRange().getValues();
     
     const seen = new Set();
@@ -10787,7 +10850,7 @@ function runSystemHealthCheck() {
   let report = '🏥 SYSTEM HEALTH REPORT\n\n';
   
   // Check essential sheets
-  const essential = ['Transactions', 'Accounts', 'Categories', 'Dashboard'];
+  const essential = [SHEET_NAMES.MAIN, SHEET_NAMES.ACCOUNTS, SHEET_NAMES.CATEGORIES, SHEET_NAMES.DASHBOARD];
   const missing = essential.filter(name => !ss.getSheetByName(name));
   
   if (missing.length === 0) {
@@ -10797,7 +10860,7 @@ function runSystemHealthCheck() {
   }
   
   // Check data integrity
-  const mainSheet = ss.getSheetByName('Transactions');
+  const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
   if (mainSheet) {
     const lastRow = mainSheet.getLastRow();
     report += `📊 Transaction count: ${lastRow - 1}\n`;
@@ -10844,7 +10907,7 @@ function fixDataFormatting() {
   
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const mainSheet = ss.getSheetByName('Transactions');
+    const mainSheet = ss.getSheetByName(SHEET_NAMES.MAIN);
     
     if (!mainSheet) {
       ui.alert('❌ Transactions sheet not found.');
